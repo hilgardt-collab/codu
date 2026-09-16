@@ -1,6 +1,8 @@
 //! In-app theme editor state. Pure state transitions over a [`ThemeDoc`];
 //! the app applies the resolved theme after each change.
 
+use ratatui::style::Color;
+
 use crate::theme::{StyleDef, Styles, Theme, ThemeDoc, parse_color};
 
 /// What a row in the editor edits.
@@ -62,6 +64,8 @@ pub struct ThemeEditor {
     pub rows: Vec<EditorRow>,
     pub cursor: usize,
     pub prompt: Option<Prompt>,
+    /// Slider-based colour picker, open for one colour field at a time.
+    pub picker: Option<ColorPicker>,
     pub dirty: bool,
     /// Feedback line (parse errors, save confirmation).
     pub message: Option<(String, bool)>,
@@ -89,6 +93,7 @@ impl ThemeEditor {
             rows,
             cursor: 2,
             prompt: None,
+            picker: None,
             dirty: false,
             message: None,
             original,
@@ -157,13 +162,13 @@ impl ThemeEditor {
         match self.row() {
             EditorRow::Name => self.open_prompt(Field::Name),
             EditorRow::Dark => self.toggle_dark(),
-            EditorRow::Style(_) => self.open_prompt(Field::Fg),
+            EditorRow::Style(_) => self.open_picker(Field::Fg),
             EditorRow::BarFilled => self.open_prompt(Field::BarFilled),
             EditorRow::BarEmpty => self.open_prompt(Field::BarEmpty),
             EditorRow::BarGradient => self.toggle_gradient(),
-            EditorRow::BarLow => self.open_prompt(Field::BarLow),
-            EditorRow::BarMid => self.open_prompt(Field::BarMid),
-            EditorRow::BarHigh => self.open_prompt(Field::BarHigh),
+            EditorRow::BarLow => self.open_picker(Field::BarLow),
+            EditorRow::BarMid => self.open_picker(Field::BarMid),
+            EditorRow::BarHigh => self.open_picker(Field::BarHigh),
         }
     }
 
@@ -202,7 +207,15 @@ impl ThemeEditor {
             self.message = Some(("bar glyphs must be exactly one cell wide".into(), true));
             return false;
         }
-        match (p.field, self.row()) {
+        self.set_field(p.field, value);
+        self.prompt = None;
+        self.mark_dirty();
+        true
+    }
+
+    /// Write a raw value into the field on the current row (`None` = inherit).
+    fn set_field(&mut self, field: Field, value: Option<String>) {
+        match (field, self.row()) {
             (Field::Name, _) => self.doc.name = value,
             (Field::Fg, EditorRow::Style(k)) => {
                 self.style_mut(k).fg = value;
@@ -219,9 +232,130 @@ impl ThemeEditor {
             (Field::BarHigh, _) => self.doc.bar.high = value,
             _ => {}
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Colour picker
+
+    /// Open the slider picker for a colour field on the current row.
+    pub fn open_picker(&mut self, field: Field) {
+        let applies = matches!(
+            (field, self.row()),
+            (Field::Fg | Field::Bg, EditorRow::Style(_))
+                | (Field::BarLow, EditorRow::BarLow)
+                | (Field::BarMid, EditorRow::BarMid)
+                | (Field::BarHigh, EditorRow::BarHigh)
+        );
+        if !applies {
+            return;
+        }
+        let current = self.current_text(field);
+        let original = if current.is_empty() {
+            None
+        } else {
+            Some(current.clone())
+        };
+        let resolved = if current.is_empty() {
+            None
+        } else {
+            parse_color(&current, &self.doc.palette).ok()
+        };
+        let rgb = resolved
+            .and_then(color_to_rgb)
+            .unwrap_or(if field == Field::Bg {
+                [30, 30, 46]
+            } else {
+                [200, 200, 200]
+            });
+        let literal = match (
+            &resolved,
+            current.starts_with('#') || current.starts_with("rgb("),
+        ) {
+            (Some(_), false) => Some(current.clone()),
+            _ => None,
+        };
+        let what = match field {
+            Field::Fg => "foreground",
+            Field::Bg => "background",
+            Field::BarLow => "gradient low",
+            Field::BarMid => "gradient mid",
+            Field::BarHigh => "gradient high",
+            _ => "colour",
+        };
+        self.picker = Some(ColorPicker {
+            field,
+            rgb,
+            hsv: rgb_to_hsv(rgb),
+            channel: 0,
+            literal,
+            entry: None,
+            original,
+            dirty_before: self.dirty,
+            label: format!("{} {what}", self.row().label()),
+        });
         self.prompt = None;
-        self.mark_dirty();
-        true
+        self.message = None;
+    }
+
+    /// Push the picker's current value into the document (live preview).
+    pub fn picker_store(&mut self) {
+        let Some(p) = &self.picker else { return };
+        let (field, value) = (p.field, Some(p.value_string()));
+        self.set_field(field, value);
+        self.dirty = true;
+        self.confirm_discard = false;
+    }
+
+    /// Keep the picker's value and close it.
+    pub fn picker_apply(&mut self) {
+        self.picker_store();
+        self.picker = None;
+    }
+
+    /// Restore the value from before the picker opened and close it.
+    pub fn picker_cancel(&mut self) {
+        let Some(p) = self.picker.take() else { return };
+        self.set_field(p.field, p.original);
+        self.dirty = p.dirty_before;
+        self.message = None;
+    }
+
+    /// Apply the picker's typed entry: a hex/rgb() value moves the sliders,
+    /// a palette key or ANSI name is kept literally. Returns false on error.
+    pub fn picker_entry_commit(&mut self) -> bool {
+        let palette = self.doc.palette.clone();
+        let Some(p) = self.picker.as_mut() else {
+            return true;
+        };
+        let Some(text) = p.entry.take() else {
+            return true;
+        };
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return true;
+        }
+        match parse_color(&text, &palette) {
+            Ok(c) => {
+                if text.starts_with('#') || text.starts_with("rgb(") {
+                    if let Some(rgb) = color_to_rgb(c) {
+                        p.set_rgb(rgb);
+                    }
+                } else {
+                    if let Some(rgb) = color_to_rgb(c) {
+                        p.set_rgb(rgb);
+                    }
+                    p.literal = Some(text);
+                }
+                self.message = None;
+                self.picker_store();
+                true
+            }
+            Err(e) => {
+                p.entry = Some(text);
+                self.message = Some((e, true));
+                false
+            }
+        }
     }
 
     pub fn cancel_prompt(&mut self) {
@@ -307,6 +441,237 @@ impl ThemeEditor {
     pub fn resolved(&self) -> Theme {
         Theme::from_doc(&self.id, &self.doc, Some(&Theme::base()))
     }
+}
+
+/// Slider-based colour editor for one colour field.
+#[derive(Clone, Debug)]
+pub struct ColorPicker {
+    pub field: Field,
+    pub rgb: [u8; 3],
+    /// Hue 0..360, saturation 0..1, value 0..1.
+    pub hsv: [f64; 3],
+    /// Active slider: 0 R, 1 G, 2 B, 3 H, 4 S, 5 V.
+    pub channel: usize,
+    /// A palette key or ANSI name chosen by typing; cleared by slider edits.
+    pub literal: Option<String>,
+    /// Inline text entry for a hex value or a name.
+    pub entry: Option<String>,
+    /// Field value when the picker opened, restored on cancel.
+    pub original: Option<String>,
+    pub dirty_before: bool,
+    /// "dir foreground", for the title.
+    pub label: String,
+}
+
+pub const CHANNELS: [&str; 6] = ["R", "G", "B", "H", "S", "V"];
+
+impl ColorPicker {
+    pub fn hex(&self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.rgb[0], self.rgb[1], self.rgb[2])
+    }
+
+    /// What gets written to the theme: the typed name, or the hex value.
+    pub fn value_string(&self) -> String {
+        self.literal.clone().unwrap_or_else(|| self.hex())
+    }
+
+    pub fn set_rgb(&mut self, rgb: [u8; 3]) {
+        self.rgb = rgb;
+        self.hsv = rgb_to_hsv(rgb);
+        self.literal = None;
+    }
+
+    pub fn set_hsv(&mut self, hsv: [f64; 3]) {
+        let h = hsv[0].rem_euclid(360.0);
+        self.hsv = [h, hsv[1].clamp(0.0, 1.0), hsv[2].clamp(0.0, 1.0)];
+        self.rgb = hsv_to_rgb(self.hsv);
+        self.literal = None;
+    }
+
+    /// Current value of the active channel in its display units
+    /// (0..255 for RGB, degrees for H, percent for S and V).
+    pub fn channel_value(&self, ch: usize) -> i32 {
+        match ch {
+            0..=2 => self.rgb[ch] as i32,
+            3 => self.hsv[0].round() as i32,
+            4 => (self.hsv[1] * 100.0).round() as i32,
+            _ => (self.hsv[2] * 100.0).round() as i32,
+        }
+    }
+
+    /// Move the active channel by `delta` display units.
+    pub fn adjust(&mut self, delta: i32) {
+        match self.channel {
+            ch @ 0..=2 => {
+                let mut rgb = self.rgb;
+                rgb[ch] = (rgb[ch] as i32 + delta).clamp(0, 255) as u8;
+                self.set_rgb(rgb);
+            }
+            3 => {
+                let mut hsv = self.hsv;
+                hsv[0] += delta as f64;
+                self.set_hsv(hsv);
+            }
+            4 => {
+                let mut hsv = self.hsv;
+                hsv[1] += delta as f64 / 100.0;
+                self.set_hsv(hsv);
+            }
+            _ => {
+                let mut hsv = self.hsv;
+                hsv[2] += delta as f64 / 100.0;
+                self.set_hsv(hsv);
+            }
+        }
+    }
+
+    /// Jump the active channel to its minimum or maximum.
+    pub fn set_extreme(&mut self, max: bool) {
+        match self.channel {
+            ch @ 0..=2 => {
+                let mut rgb = self.rgb;
+                rgb[ch] = if max { 255 } else { 0 };
+                self.set_rgb(rgb);
+            }
+            3 => {
+                let mut hsv = self.hsv;
+                hsv[0] = if max { 359.0 } else { 0.0 };
+                self.set_hsv(hsv);
+            }
+            ch => {
+                let mut hsv = self.hsv;
+                hsv[ch - 3] = if max { 1.0 } else { 0.0 };
+                self.set_hsv(hsv);
+            }
+        }
+    }
+
+    /// Colour the slider would produce at position `t` in 0..=1.
+    pub fn color_at(&self, ch: usize, t: f64) -> Color {
+        let t = t.clamp(0.0, 1.0);
+        let [r, g, b] = self.rgb;
+        let [h, s, v] = self.hsv;
+        let rgb = match ch {
+            0 => [(t * 255.0) as u8, g, b],
+            1 => [r, (t * 255.0) as u8, b],
+            2 => [r, g, (t * 255.0) as u8],
+            3 => hsv_to_rgb([t * 359.0, s.max(0.35), v.max(0.5)]),
+            4 => hsv_to_rgb([h, t, v.max(0.3)]),
+            _ => hsv_to_rgb([h, s, t]),
+        };
+        Color::Rgb(rgb[0], rgb[1], rgb[2])
+    }
+}
+
+pub fn rgb_to_hsv(rgb: [u8; 3]) -> [f64; 3] {
+    let r = rgb[0] as f64 / 255.0;
+    let g = rgb[1] as f64 / 255.0;
+    let b = rgb[2] as f64 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    let h = if d == 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * (((g - b) / d).rem_euclid(6.0))
+    } else if max == g {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+    let s = if max == 0.0 { 0.0 } else { d / max };
+    [h, s, max]
+}
+
+pub fn hsv_to_rgb(hsv: [f64; 3]) -> [u8; 3] {
+    let h = hsv[0].rem_euclid(360.0);
+    let s = hsv[1].clamp(0.0, 1.0);
+    let v = hsv[2].clamp(0.0, 1.0);
+    let c = v * s;
+    let x = c * (1.0 - ((h / 60.0).rem_euclid(2.0) - 1.0).abs());
+    let m = v - c;
+    let (r, g, b) = match (h / 60.0) as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let to = |f: f64| ((f + m) * 255.0).round().clamp(0.0, 255.0) as u8;
+    [to(r), to(g), to(b)]
+}
+
+/// Approximate RGB for the 16 named ANSI colours (xterm defaults).
+pub const ANSI_NAMED: [(&str, Color, [u8; 3]); 16] = [
+    ("black", Color::Black, [0, 0, 0]),
+    ("red", Color::Red, [205, 0, 0]),
+    ("green", Color::Green, [0, 205, 0]),
+    ("yellow", Color::Yellow, [205, 205, 0]),
+    ("blue", Color::Blue, [0, 0, 238]),
+    ("magenta", Color::Magenta, [205, 0, 205]),
+    ("cyan", Color::Cyan, [0, 205, 205]),
+    ("gray", Color::Gray, [229, 229, 229]),
+    ("darkgray", Color::DarkGray, [127, 127, 127]),
+    ("lightred", Color::LightRed, [255, 0, 0]),
+    ("lightgreen", Color::LightGreen, [0, 255, 0]),
+    ("lightyellow", Color::LightYellow, [255, 255, 0]),
+    ("lightblue", Color::LightBlue, [92, 92, 255]),
+    ("lightmagenta", Color::LightMagenta, [255, 0, 255]),
+    ("lightcyan", Color::LightCyan, [0, 255, 255]),
+    ("white", Color::White, [255, 255, 255]),
+];
+
+/// RGB of an xterm-256 index.
+pub fn xterm256_rgb(idx: u8) -> [u8; 3] {
+    match idx {
+        0..=15 => ANSI_NAMED[idx as usize].2,
+        16..=231 => {
+            let i = idx - 16;
+            let step = |n: u8| if n == 0 { 0 } else { 55 + n * 40 };
+            [step(i / 36), step((i / 6) % 6), step(i % 6)]
+        }
+        _ => {
+            let g = 8 + (idx - 232) * 10;
+            [g, g, g]
+        }
+    }
+}
+
+/// Best-effort RGB for any ratatui colour.
+pub fn color_to_rgb(c: Color) -> Option<[u8; 3]> {
+    match c {
+        Color::Rgb(r, g, b) => Some([r, g, b]),
+        Color::Indexed(i) => Some(xterm256_rgb(i)),
+        Color::Reset => None,
+        other => ANSI_NAMED
+            .iter()
+            .find(|(_, col, _)| *col == other)
+            .map(|(_, _, rgb)| *rgb),
+    }
+}
+
+fn distance(a: [u8; 3], b: [u8; 3]) -> u32 {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (*x as i32 - y as i32).pow(2) as u32)
+        .sum()
+}
+
+/// Closest of the 16 named ANSI colours.
+pub fn nearest_ansi(rgb: [u8; 3]) -> &'static str {
+    ANSI_NAMED
+        .iter()
+        .min_by_key(|(_, _, c)| distance(rgb, *c))
+        .map(|(n, _, _)| *n)
+        .unwrap_or("white")
+}
+
+/// Closest xterm-256 index.
+pub fn nearest_xterm256(rgb: [u8; 3]) -> u8 {
+    (0..=255u8)
+        .min_by_key(|&i| distance(rgb, xterm256_rgb(i)))
+        .unwrap_or(15)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -407,6 +772,102 @@ mod tests {
         e.clear_row();
         assert!(!e.doc.styles.contains_key("file"));
         assert_eq!(e.resolved().styles.file, Theme::base().styles.file);
+    }
+
+    #[test]
+    fn hsv_round_trips() {
+        for rgb in [
+            [0, 0, 0],
+            [255, 255, 255],
+            [137, 180, 250],
+            [205, 0, 0],
+            [12, 200, 90],
+            [128, 128, 128],
+        ] {
+            let back = hsv_to_rgb(rgb_to_hsv(rgb));
+            for i in 0..3 {
+                assert!(
+                    (back[i] as i32 - rgb[i] as i32).abs() <= 1,
+                    "{rgb:?} -> {back:?}"
+                );
+            }
+        }
+        assert_eq!(rgb_to_hsv([255, 0, 0])[0], 0.0);
+        assert_eq!(rgb_to_hsv([0, 255, 0])[0], 120.0);
+        assert_eq!(hsv_to_rgb([240.0, 1.0, 1.0]), [0, 0, 255]);
+    }
+
+    #[test]
+    fn nearest_colours_and_xterm() {
+        assert_eq!(nearest_ansi([250, 5, 5]), "lightred");
+        assert_eq!(nearest_ansi([0, 0, 0]), "black");
+        assert_eq!(xterm256_rgb(16), [0, 0, 0]);
+        assert_eq!(xterm256_rgb(231), [255, 255, 255]);
+        assert_eq!(xterm256_rgb(196), [255, 0, 0]);
+        assert_eq!(nearest_xterm256([255, 0, 0]), 9); // lightred beats 196 on exact match order
+        assert_eq!(nearest_xterm256([95, 135, 175]), 67);
+        assert_eq!(color_to_rgb(Color::Indexed(196)), Some([255, 0, 0]));
+        assert_eq!(color_to_rgb(Color::Reset), None);
+    }
+
+    #[test]
+    fn picker_edits_live_and_cancel_restores() {
+        let mut e = editor();
+        goto(&mut e, "dir");
+        e.open_picker(Field::Fg);
+        let p = e.picker.as_ref().unwrap();
+        assert_eq!(p.literal.as_deref(), Some("nord9"));
+        assert_eq!(p.rgb, [0x81, 0xa1, 0xc1]);
+        assert_eq!(p.original.as_deref(), Some("nord9"));
+        // Slider edits become hex and preview live.
+        e.picker.as_mut().unwrap().channel = 0;
+        e.picker.as_mut().unwrap().adjust(10);
+        e.picker_store();
+        assert_eq!(e.style_def("dir").fg.as_deref(), Some("#8ba1c1"));
+        assert!(e.dirty);
+        assert_eq!(
+            e.resolved().styles.dir.fg,
+            Some(Color::Rgb(0x8b, 0xa1, 0xc1))
+        );
+        // HSV edits keep RGB in sync.
+        e.picker.as_mut().unwrap().channel = 5;
+        e.picker.as_mut().unwrap().set_extreme(false);
+        assert_eq!(e.picker.as_ref().unwrap().rgb, [0, 0, 0]);
+        e.picker.as_mut().unwrap().channel = 3;
+        e.picker.as_mut().unwrap().adjust(-30);
+        assert!(e.picker.as_ref().unwrap().hsv[0] >= 0.0);
+        // Cancel restores the palette key and the dirty flag.
+        e.picker_cancel();
+        assert!(e.picker.is_none());
+        assert_eq!(e.style_def("dir").fg.as_deref(), Some("nord9"));
+        assert!(!e.dirty);
+    }
+
+    #[test]
+    fn picker_entry_accepts_hex_and_palette_keys() {
+        let mut e = editor();
+        goto(&mut e, "file");
+        e.open_picker(Field::Bg);
+        assert_eq!(e.picker.as_ref().unwrap().original, None);
+        e.picker.as_mut().unwrap().entry = Some("#ff0000".into());
+        assert!(e.picker_entry_commit());
+        assert_eq!(e.picker.as_ref().unwrap().rgb, [255, 0, 0]);
+        assert_eq!(e.style_def("file").bg.as_deref(), Some("#ff0000"));
+        e.picker.as_mut().unwrap().entry = Some("nord3".into());
+        assert!(e.picker_entry_commit());
+        assert_eq!(e.picker.as_ref().unwrap().value_string(), "nord3");
+        assert_eq!(e.style_def("file").bg.as_deref(), Some("nord3"));
+        e.picker.as_mut().unwrap().entry = Some("bogus".into());
+        assert!(!e.picker_entry_commit());
+        assert!(e.message.as_ref().unwrap().1);
+        e.picker_apply();
+        assert!(e.picker.is_none());
+        assert_eq!(e.style_def("file").bg.as_deref(), Some("nord3"));
+        // Cancel after apply does nothing; original was None so a fresh
+        // open + cancel removes the field again.
+        e.open_picker(Field::Bg);
+        e.picker_cancel();
+        assert_eq!(e.style_def("file").bg.as_deref(), Some("nord3"));
     }
 
     #[test]

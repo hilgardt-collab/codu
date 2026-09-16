@@ -204,6 +204,7 @@ dependencies = [
  "clap",
  "dirs",
  "globset",
+ "libc",
  "ratatui",
  "rayon",
  "serde",

@@ -9,6 +9,7 @@ mod scan;
 mod theme;
 mod theme_editor;
 mod ui;
+mod volumes;
 
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -76,7 +77,7 @@ fn main() -> Result<()> {
     }
 
     let mouse = config.mouse;
-    let mut app = App::new(config, theme, icons, root, scan_options);
+    let mut app = App::new(config, theme, icons, root, scan_options, cli.volumes);
     if !warnings.is_empty() {
         app.set_status(warnings.join(" | "), true);
     }
@@ -144,6 +145,9 @@ fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
     }
     if cli.one_file_system {
         config.one_file_system = true;
+    }
+    if cli.cross_volumes {
+        config.one_file_system = false;
     }
     config.exclude.extend(cli.exclude.iter().cloned());
     if cli.apparent_size {

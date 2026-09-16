@@ -28,9 +28,18 @@ restyle every part of the interface.
   whole scan with `+`/`-` toggles. `Tab` switches between them and keeps
   your selection.
 - **ncdu-compatible keys** so you already know how to use it, plus vim keys
-  and mouse support (click, double-click, wheel). `Esc` quits.
+  and mouse support (click, double-click, wheel). `Esc` quits. The key
+  guide at the bottom lists every shortcut for the current view, wrapping
+  over as many lines as needed (`key-guide = "compact"` for one line).
 - **Walk up** past where you started: the `..` row at the top of the root
-  listing scans the parent directory.
+  listing scans the parent directory, and above `/` it opens the volumes
+  screen.
+- **Volume aware**: scans stay on the starting volume by default. Other
+  mounted volumes appear as mount points (flag `>`, 💾) showing that
+  volume's own usage, and are not counted in the totals. `-X` crosses them.
+- **Volumes screen** (`V`, `--volumes`, or `..` above `/`): every mounted and
+  unmounted volume with device, filesystem, label, usage and capacity.
+  Enter scans a mounted volume.
 - **Themes**: eight built in (Catppuccin Mocha/Latte, Dracula, Gruvbox Dark,
   Nord, Tokyo Night, Solarized Light, and a 16-colour `ansi` fallback), a
   live in-app picker, and TOML theme files where every UI element, the bar
@@ -66,7 +75,9 @@ cdu [OPTIONS] [PATH]
   -T, --theme <NAME>      theme name or path to a .toml file
       --icons <MODE>      emoji | ascii | none
       --tree              start in tree view
-  -x, --one-file-system   do not cross filesystem boundaries
+  -x, --one-file-system   stay on the scanned volume (default)
+  -X, --cross-volumes     descend into other mounted volumes
+      --volumes           start on the volumes screen
       --exclude <GLOB>    exclude matching entries (repeatable)
       --apparent-size     show apparent sizes instead of disk usage
       --si                decimal units (kB, MB, GB)
@@ -109,12 +120,45 @@ cdu [OPTIONS] [PATH]
 | `d` / `D`                  | delete permanently / move to trash (asks first)       |
 | `r`                        | rescan (list: current directory; tree: selected)      |
 | `T`                        | theme picker: `e` edit, `n` new copy, `S` set default |
+| `V`                        | volumes screen                                        |
 | `?` `F1`                   | help                                                  |
 | `Esc` `Ctrl-C`             | quit (`Esc` first closes popups / clears the filter)  |
 
 Entry flags follow ncdu: `!` unreadable, `.` unreadable subdirectory,
-`<` excluded, `>` other filesystem, `@` symlink/special, `H` hard link
-counted elsewhere, `e` empty directory.
+`<` excluded, `>` mount point of another volume, `@` symlink/special,
+`H` hard link counted elsewhere, `e` empty directory.
+
+### Volumes
+
+Scans do not cross into other mounted volumes: a mount point inside the
+scan is listed with the `>` flag and the 💾 icon, its size column shows how
+much of *that volume* is in use, and it contributes nothing to the parent's
+total. `i` on it shows the device, filesystem and capacity. Pass `-X` or set
+`one-file-system = false` to scan across mounts instead.
+
+The volumes screen (`V`, `cdu --volumes`, or `..` from `/`) lists every
+volume the system knows about:
+
+```
+ 💽 cdu  Volumes                                                        Catppuccin Mocha
+╭──────────────────────────────────────────────────────────────────────────────────────╮
+│▸   💾 /                        nvme1n1p1    btrfs      412 GiB ███░░░░░░░░░  1.8 TiB  22.6%  disk│
+│    💾 /home                    nvme1n1p1    btrfs      412 GiB ███░░░░░░░░░  1.8 TiB  22.6%  disk│
+│    🔌 /run/media/me/USB        sdc1         exfat      118 GiB ████████░░░░  466 GiB  25.3%  removable│
+│    🌐 /mnt/nas                 nas:/export  nfs4       3.1 TiB █████████░░░  4.0 TiB  77.5%  network│
+│    🔁 /dev/zram0                            swap       1.6 GiB ░░░░░░░░░░░░ 60.4 GiB   2.6%  swap│
+│    💤 /dev/nvme0n1p3                        ntfs   not mounted ░░░░░░░░░░░░  1.9 TiB      -  disk│
+╰────────────────────────────────────────────────────────────────────────────────── 1/6 ╯
+ 💽 6 volumes  ·  4 mounted  ·  ⏎ scans a mounted volume
+ ↑↓ jk  move   ⏎ →  scan volume   r  refresh   Esc ← V  back   T  themes   ?  help
+```
+
+Mounted volumes come from `/proc/self/mounts` (real devices, network and
+FUSE filesystems; pseudo filesystems and snap images are skipped) with usage
+from `statvfs`. Unmounted volumes come from `/sys/class/block` (partitions,
+and whole disks without a partition table) with filesystem type and label
+from the udev database, plus active swap from `/proc/swaps`. This needs
+Linux; on other platforms the screen is empty.
 
 ### Group by type
 
@@ -169,6 +213,7 @@ icons = "emoji"          # emoji | ascii | none
 view = "list"            # list | tree (Tab switches at runtime)
 mouse = true
 borders = true
+key-guide = "full"       # full | compact | off
 si = false
 apparent-size = false
 dirs-first = false
@@ -181,7 +226,7 @@ group-by-type = false
 sort = "size"            # size | name | count | mtime
 sort-reverse = false
 exclude = []
-one-file-system = false
+one-file-system = true   # stay on the starting volume; -X to cross
 threads = 0
 confirm-delete = true
 read-only = false
@@ -216,12 +261,47 @@ it immediately.
 | Key                 | Action                                                  |
 |---------------------|---------------------------------------------------------|
 | `↑` `↓`             | choose an element                                       |
-| `f` / `g`           | type a foreground / background colour (`none` inherits) |
+| `f` / `g`           | open the colour picker for the foreground / background   |
+| `F` / `G`           | type a colour value directly (`none` inherits)          |
 | `b` `i` `u` `d` `r` `x` | toggle bold, italic, underline, dim, reversed, strike |
 | `Del`               | clear the element so it inherits from the base theme    |
 | `⏎`                 | edit the natural value of the row (name, dark, colours) |
 | `s`                 | save to `~/.config/cdu/themes/<id>.toml`                |
 | `Esc`               | close (asks once if there are unsaved changes)          |
+
+#### Colour picker
+
+`f`, `g`, or Enter on a colour row opens a picker with six sliders: R, G, B
+and H, S, V, kept in sync, each drawn as a gradient of what that position
+would give. The hex value, `rgb()` form, nearest ANSI name and nearest
+256-colour index are shown, with a live sample against the element's other
+colour, and the whole interface behind the modal previews the colour as you
+move it.
+
+```
+╭ 🎨 Colour: dir foreground ─────────────────────────────────────────╮
+│                                                                    │
+│   R ██████████████┃░░░░░░░░░░░░░░░░░░░░░░░░░  93                   │
+│ ▸ G ██████████████████████┃░░░░░░░░░░░░░░░░░ 141                   │
+│   B ██████████████████████████████┃░░░░░░░░░ 193                   │
+│                                                                    │
+│   H ███████████████████████┃░░░░░░░░░░░░░░░░ 211°                  │
+│   S ████████████████████┃░░░░░░░░░░░░░░░░░░░  52%                  │
+│   V ██████████████████████████████┃░░░░░░░░░  76%                  │
+│                                                                    │
+│   value #5d8dc1   rgb(93, 141, 193)   ansi darkgray   256 #67      │
+│   preview ████ Sample text 123 ████                                │
+│                                                                    │
+│ ↑↓ slider  ←→ ±1  H L ±10  PgUp PgDn ±16  Home End min/max  Tab … │
+│ # hex  n name/palette  ⏎ apply  Esc cancel                         │
+╰────────────────────────────────────────────────────────────────────╯
+```
+
+`↑↓` choose a slider, `←→` step by 1, `H`/`L` by 10, `PgUp`/`PgDn` by 16,
+`Home`/`End` jump to the ends, `Tab` hops between the RGB and HSV groups.
+`#` lets you type a hex value; `n` a palette key or ANSI name, which is
+then kept by name in the saved file. `Enter` keeps the colour, `Esc` puts
+the previous value back.
 
 `S` in the picker writes `theme = "<id>"` to your `config.toml` so the theme
 loads next time. Editing a built-in theme saves a user copy with the same id,

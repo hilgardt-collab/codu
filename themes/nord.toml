@@ -65,6 +65,7 @@ filter        = { fg = "nord13", bold = true }
 tree_guide    = { fg = "nord3" }
 tree_toggle   = { fg = "nord8", bold = true }
 group         = { fg = "nord3", italic = true }
+mount         = { fg = "nord7" }
 
 [bar]
 gradient = true

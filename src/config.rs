@@ -46,6 +46,35 @@ pub enum View {
     Tree,
 }
 
+/// How much of the keyboard guide to show at the bottom of the screen.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum KeyGuide {
+    /// Every shortcut for the current context, wrapped over several lines.
+    Full,
+    /// A single line, truncated to the terminal width.
+    Compact,
+    Off,
+}
+
+impl KeyGuide {
+    pub fn next(self) -> Self {
+        match self {
+            KeyGuide::Full => KeyGuide::Compact,
+            KeyGuide::Compact => KeyGuide::Off,
+            KeyGuide::Off => KeyGuide::Full,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            KeyGuide::Full => "full",
+            KeyGuide::Compact => "compact",
+            KeyGuide::Off => "off",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum SortKey {
@@ -74,6 +103,7 @@ pub struct Config {
     pub view: View,
     pub mouse: bool,
     pub borders: bool,
+    pub key_guide: KeyGuide,
     pub si: bool,
     pub apparent_size: bool,
     pub dirs_first: bool,
@@ -101,6 +131,7 @@ impl Default for Config {
             view: View::List,
             mouse: true,
             borders: true,
+            key_guide: KeyGuide::Full,
             si: false,
             apparent_size: false,
             dirs_first: false,
@@ -113,7 +144,7 @@ impl Default for Config {
             sort: SortKey::Size,
             sort_reverse: false,
             exclude: Vec::new(),
-            one_file_system: false,
+            one_file_system: true,
             threads: 0,
             confirm_delete: true,
             read_only: false,
@@ -218,6 +249,7 @@ mod tests {
         assert_eq!(parsed.theme, def.theme);
         assert_eq!(parsed.icons, def.icons);
         assert_eq!(parsed.view, def.view);
+        assert_eq!(parsed.key_guide, def.key_guide);
         assert_eq!(parsed.bar_mode, def.bar_mode);
         assert_eq!(parsed.bar_width, def.bar_width);
         assert_eq!(parsed.sort, def.sort);

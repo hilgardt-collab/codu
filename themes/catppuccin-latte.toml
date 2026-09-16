@@ -75,6 +75,7 @@ filter        = { fg = "peach", bold = true }
 tree_guide    = { fg = "surface2" }
 tree_toggle   = { fg = "mauve", bold = true }
 group         = { fg = "overlay1", italic = true }
+mount         = { fg = "sapphire" }
 
 [bar]
 gradient = true

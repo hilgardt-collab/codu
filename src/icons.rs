@@ -29,6 +29,14 @@ pub struct IconSet {
     pub special: String,
     pub error: String,
     pub empty_dir: String,
+    /// A mount point of another volume inside the scan.
+    pub mount: String,
+    pub volume: String,
+    pub removable: String,
+    pub network: String,
+    pub optical: String,
+    pub swap: String,
+    pub unmounted: String,
     pub spinner: Vec<String>,
     ext: HashMap<String, String>,
     names: HashMap<String, String>,
@@ -282,9 +290,16 @@ impl IconSet {
             file: "📄".into(),
             symlink: "🔗".into(),
             hidden: "👻".into(),
-            special: "🔌".into(),
+            special: "🧷".into(),
             error: "❗".into(),
             empty_dir: "📁".into(),
+            mount: "💾".into(),
+            volume: "💾".into(),
+            removable: "🔌".into(),
+            network: "🌐".into(),
+            optical: "💿".into(),
+            swap: "🔁".into(),
+            unmounted: "💤".into(),
             spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
                 .iter()
                 .map(|s| s.to_string())
@@ -307,6 +322,13 @@ impl IconSet {
             special: "%".into(),
             error: "!".into(),
             empty_dir: "/".into(),
+            mount: "M".into(),
+            volume: "M".into(),
+            removable: "R".into(),
+            network: "N".into(),
+            optical: "O".into(),
+            swap: "S".into(),
+            unmounted: "-".into(),
             spinner: ["|", "/", "-", "\\"]
                 .iter()
                 .map(|s| s.to_string())
@@ -363,6 +385,13 @@ impl IconSet {
             &mut self.special,
             &mut self.error,
             &mut self.empty_dir,
+            &mut self.mount,
+            &mut self.volume,
+            &mut self.removable,
+            &mut self.network,
+            &mut self.optical,
+            &mut self.swap,
+            &mut self.unmounted,
         ] {
             *s = normalize(s, fallback);
         }
@@ -436,7 +465,9 @@ impl IconSet {
         let hidden = node.name.starts_with('.');
         match node.kind {
             Kind::Dir => {
-                if node.has(crate::scan::flags::ERR) {
+                if node.has(crate::scan::flags::OTHER_FS) {
+                    &self.mount
+                } else if node.has(crate::scan::flags::ERR) {
                     &self.error
                 } else if hidden {
                     &self.hidden
@@ -547,6 +578,13 @@ mod tests {
         let set = IconSet::build(IconMode::Emoji, &IconsDef::default());
         for s in [
             &set.dir,
+            &set.mount,
+            &set.volume,
+            &set.removable,
+            &set.network,
+            &set.optical,
+            &set.swap,
+            &set.unmounted,
             &set.dir_open,
             &set.parent,
             &set.file,

@@ -87,7 +87,9 @@ Design rules that follow from this:
  │                                                                         │
  ├─────────────────────────────────────────────────────────────────────────┤
  │ 💾 20.3 GiB in 45,231 items  ·  🔽 size  ·  disk usage                  │  status
- │ ↑↓ move  ⏎ open  ⌫ up  s size  n name  g graph  i info  d del  ? help  │  key bar
+ │ ↑↓ jk move  PgUp PgDn page  Home End first/last  ⏎ → open  ⌫ ← up      │  key guide:
+ │ Tab tree view  / filter  s sort size  n sort name  C sort items  M …    │  every key,
+ │ t dirs first  y by type  … o options  T themes  ? help  Esc quit         │  wrapped
  └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -147,6 +149,7 @@ percent/count columns drop, so the tool stays usable in a split pane.
 | `d` / `D`                | delete permanently / move to trash (confirm first)  |
 | `r`                      | rescan (list: current directory; tree: selection)   |
 | `T`                      | theme picker; inside: `e` edit, `n` new copy, `S` set default |
+| `V`                      | volumes screen (also `..` above `/`)                |
 | `?` / `F1`               | help                                                |
 | `Esc` / `Ctrl-C`         | quit; `Esc` first closes popups and clears a filter |
 | mouse                    | click select, double-click open/toggle, wheel scroll|
@@ -162,6 +165,27 @@ the scan it goes up one level. At the root it scans the parent directory
 and makes it the new root, with the previous root pre-selected, so you can
 walk up the filesystem without restarting. The scan is cancellable with
 `Esc`, which keeps the current view.
+
+### Volumes
+
+* Scans stay on the starting volume by default (`one-file-system = true`).
+  The check is `st_dev`, so btrfs subvolumes and bind mounts count as
+  separate volumes too, which matches the mount table. `-X` crosses.
+* A mount point inside the scan is a directory node with the `OTHER_FS`
+  flag and zero size; the row renders that volume's own `statvfs` usage in
+  the `mount` style with a `volume <dev>` label where the bar would be, so
+  it is visibly not part of the scan's arithmetic.
+* The volumes screen is a separate top-level state (`App::volumes`), shown
+  instead of the browser. Entering a mounted volume starts a scan with it
+  as the new root; the screen closes when the scan lands. Esc returns to
+  the previous scan, or quits when there is none.
+* Discovery (`volumes.rs`, Linux): `/proc/self/mounts` filtered to real
+  devices, network and FUSE filesystems (minus portal/gvfs) and non-loop
+  devices; `/proc/swaps`; `/sys/class/block` for partitions and
+  partition-less disks not in the mount table, with fs type and label from
+  `/run/udev/data/b<maj>:<min>` (world-readable, no root needed) and size
+  from sysfs; removable/optical from sysfs; usage via `libc::statvfs`.
+  RAID and LVM members are skipped (their assembled devices are listed).
 
 ### Tree view
 
@@ -271,8 +295,11 @@ Editing works on the raw theme document (`ThemeDoc`, the same shape as the
 TOML file, palette references included) rather than the resolved styles,
 so saved files stay readable and keep their palette names. After every
 change the document is re-resolved and applied, so the browser behind the
-editor previews live. Rows cover name, dark badge, all 44 style keys and the
-six bar settings. Text prompts start empty with the current value as a hint;
+editor previews live. Rows cover name, dark badge, all style keys and the
+six bar settings. Colour fields open a slider picker (R G B / H S V kept in
+sync, hex/rgb/nearest-ANSI/256 readout, live preview; typed hex or palette
+names are accepted, and palette names are stored literally so the saved
+file stays readable). Text prompts start empty with the current value as a hint;
 `none` clears a field, and a key whose fields are all cleared is removed so
 it inherits from the `ansi` base again. Saving writes
 `$XDG_CONFIG_HOME/cdu/themes/<id>.toml`; `S` in the picker rewrites the
@@ -293,6 +320,7 @@ src/
   icons.rs     – icon resolution + width normalisation
   scan.rs      – parallel scanner (rayon), Node tree, hard-link dedupe,
                  progress counters, exclude globs, one-file-system
+  volumes.rs   – mounted/unmounted volume discovery (Linux), statvfs usage
   app.rs       – App state: navigation stack, sort, columns, filter, popups,
                  delete/trash/refresh actions
   ui/          – rendering: browser, scanning screen, popups, formatting

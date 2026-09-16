@@ -21,6 +21,11 @@ mouse = true
 # Draw a rounded frame around the file list.
 borders = true
 
+# Keyboard guide at the bottom: "full" shows every shortcut for the current
+# view (wrapping over several lines), "compact" is one truncated line, "off"
+# hides it. Cycle at runtime with k in the options popup (o).
+key-guide = "full"
+
 # Use decimal units (kB, MB, GB) instead of binary (KiB, MiB, GiB).
 si = false
 
@@ -52,8 +57,10 @@ sort-reverse = false
 # Glob patterns to exclude from the scan (matched against names and full paths).
 exclude = []
 
-# Do not cross filesystem boundaries (same as -x).
-one-file-system = false
+# Stay on the volume being scanned: other mounted volumes show up as mount
+# points (flag >) with their own usage but are not descended into.
+# Set to false (or pass -X / --cross-volumes) to scan across mounts.
+one-file-system = true
 
 # Scanner threads; 0 means one per CPU.
 threads = 0

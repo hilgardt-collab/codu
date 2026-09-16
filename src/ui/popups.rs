@@ -98,6 +98,15 @@ const HELP: &[(&str, &str)] = &[
     ("c  m", "toggle item-count / mtime column"),
     ("e", "toggle hidden entries"),
     ("T", "theme picker: e edit, n new copy, S set default"),
+    ("V", "volumes screen (also: .. at the filesystem root)"),
+    ("", ""),
+    ("", "Volumes screen"),
+    ("⏎ →", "scan the selected mounted volume"),
+    ("r", "refresh the list"),
+    (
+        "Esc ← V",
+        "back to the browser (Esc quits if nothing is scanned)",
+    ),
     ("", ""),
     ("", "Actions"),
     ("i", "info about the selected entry"),
@@ -132,8 +141,11 @@ fn help(frame: &mut Frame, app: &App, scroll: u16) {
     let inner = frame_box(
         frame,
         app,
-        &format!("{}Help", icon_or(app, "❓ ")),
-        66,
+        &format!(
+            "{}Help  (↑↓ scroll · any other key closes)",
+            icon_or(app, "❓ ")
+        ),
+        70,
         height,
         false,
     );
@@ -211,7 +223,29 @@ fn info(frame: &mut Frame, app: &App) {
             format!("{} of {}", format::percent(share), parent_label),
         ),
     ];
-    if node.is_dir() {
+    if node.has(crate::scan::flags::OTHER_FS) {
+        match app.volume_for(&path) {
+            Some(v) => {
+                let fs = if v.fs_type.is_empty() {
+                    "unknown fs"
+                } else {
+                    v.fs_type.as_str()
+                };
+                rows.push(("Volume", format!("{} ({fs}, {})", v.device, v.kind.label())));
+                rows.push((
+                    "Volume usage",
+                    format!(
+                        "{} used of {} ({})",
+                        format::bytes_str(v.used, app.si),
+                        format::bytes_str(v.total, app.si),
+                        format::percent(v.share())
+                    ),
+                ));
+            }
+            None => rows.push(("Volume", "another volume (not descended into)".into())),
+        }
+    }
+    if node.is_dir() && !node.has(crate::scan::flags::OTHER_FS) {
         rows.push((
             "Contents",
             format!(
@@ -461,6 +495,11 @@ fn options(frame: &mut Frame, app: &App) {
         ("i", "   ".into(), format!("icons: {icons}")),
         ("v", "   ".into(), format!("view: {view}")),
         ("B", check(app.config.borders).into(), "borders".into()),
+        (
+            "k",
+            "   ".into(),
+            format!("key guide: {}", app.config.key_guide.label()),
+        ),
     ];
     let mut lines: Vec<Line> = vec![Line::default()];
     for (k, state, label) in rows {
@@ -660,9 +699,11 @@ fn editor(frame: &mut Frame, app: &App, ed: &crate::theme_editor::ThemeEditor) {
     } else {
         foot_lines.push(Line::from(vec![
             Span::styled(" f ", st.keybar_key),
-            Span::styled(" fg ", st.keybar_label),
+            Span::styled(" fg picker ", st.keybar_label),
             Span::styled(" g ", st.keybar_key),
-            Span::styled(" bg ", st.keybar_label),
+            Span::styled(" bg picker ", st.keybar_label),
+            Span::styled(" F G ", st.keybar_key),
+            Span::styled(" type value ", st.keybar_label),
             Span::styled(" b i u d r x ", st.keybar_key),
             Span::styled(
                 " bold italic underline dim reversed strike ",
@@ -701,6 +742,186 @@ fn editor(frame: &mut Frame, app: &App, ed: &crate::theme_editor::ThemeEditor) {
         None => foot_lines.push(Line::default()),
     }
     frame.render_widget(Paragraph::new(Text::from(foot_lines)), foot);
+
+    if let Some(picker) = &ed.picker {
+        color_picker(frame, app, ed, picker);
+    }
+}
+
+/// The RGB / HSV slider modal drawn over the theme editor.
+fn color_picker(
+    frame: &mut Frame,
+    app: &App,
+    ed: &crate::theme_editor::ThemeEditor,
+    pk: &crate::theme_editor::ColorPicker,
+) {
+    use crate::theme_editor::{CHANNELS, EditorRow, Field, nearest_ansi, nearest_xterm256};
+    use ratatui::style::Color;
+    let st = &app.theme.styles;
+    let width = 78.min(frame.area().width.saturating_sub(2));
+    let height = 19.min(frame.area().height.saturating_sub(2));
+    let inner = frame_box(
+        frame,
+        app,
+        &format!("{}Colour: {}", icon_or(app, "🎨 "), pk.label),
+        width,
+        height,
+        false,
+    );
+    let slider_w = (inner.width as usize).saturating_sub(18).clamp(8, 40);
+    let mut lines: Vec<Line> = vec![Line::default()];
+
+    for (ch, name) in CHANNELS.iter().enumerate() {
+        if ch == 3 {
+            lines.push(Line::default());
+        }
+        let active = ch == pk.channel;
+        let value = pk.channel_value(ch);
+        let (max, unit) = match ch {
+            0..=2 => (255.0, ""),
+            3 => (359.0, "°"),
+            _ => (100.0, "%"),
+        };
+        let pos = ((value as f64 / max) * (slider_w as f64 - 1.0)).round() as usize;
+        let mut spans = vec![
+            Span::styled(if active { " ▸ " } else { "   " }, st.marker),
+            Span::styled(
+                format!("{name} "),
+                if active { st.help_key } else { st.help_desc },
+            ),
+        ];
+        for i in 0..slider_w {
+            let colour = pk.color_at(ch, i as f64 / (slider_w as f64 - 1.0));
+            let glyph = if i == pos {
+                "┃"
+            } else if i < pos {
+                "█"
+            } else {
+                "░"
+            };
+            spans.push(Span::styled(glyph, Style::new().fg(colour)));
+        }
+        spans.push(Span::styled(
+            format!(" {value:>3}{unit}"),
+            if active { st.help_key } else { st.help_desc },
+        ));
+        lines.push(Line::from(spans));
+    }
+
+    lines.push(Line::default());
+    let rgb = pk.rgb;
+    let swatch = Color::Rgb(rgb[0], rgb[1], rgb[2]);
+    let mut value_line = vec![
+        Span::styled("   value ", st.help_desc),
+        Span::styled(pk.value_string(), st.help_key),
+    ];
+    if pk.literal.is_some() {
+        value_line.push(Span::styled(format!("  ({})", pk.hex()), st.hidden));
+    }
+    value_line.push(Span::styled(
+        format!(
+            "   rgb({}, {}, {})   ansi {}   256 #{}",
+            rgb[0],
+            rgb[1],
+            rgb[2],
+            nearest_ansi(rgb),
+            nearest_xterm256(rgb)
+        ),
+        st.hidden,
+    ));
+    lines.push(Line::from(value_line));
+
+    // Preview against the element's other colour.
+    let (fg, bg) = match (pk.field, ed.row()) {
+        (Field::Fg, EditorRow::Style(k)) => {
+            (Some(swatch), app.theme.styles.get(k).and_then(|s| s.bg))
+        }
+        (Field::Bg, EditorRow::Style(k)) => {
+            (app.theme.styles.get(k).and_then(|s| s.fg), Some(swatch))
+        }
+        _ => (Some(swatch), None),
+    };
+    let mut preview = Style::new();
+    if let Some(f) = fg {
+        preview = preview.fg(f);
+    }
+    if let Some(b) = bg {
+        preview = preview.bg(b);
+    }
+    lines.push(Line::from(vec![
+        Span::styled("   preview ", st.help_desc),
+        Span::styled("████", Style::new().fg(swatch)),
+        Span::styled(" Sample text 123 ", preview),
+        Span::styled("████", Style::new().fg(swatch)),
+        Span::styled(
+            match pk.field {
+                Field::BarLow | Field::BarMid | Field::BarHigh => "  ██████░░░░ bar",
+                _ => "",
+            },
+            Style::new().fg(swatch),
+        ),
+    ]));
+
+    lines.push(Line::default());
+    match &pk.entry {
+        Some(text) => {
+            lines.push(Line::from(vec![
+                Span::styled("   type a colour: ", st.help_desc),
+                Span::styled(text.clone(), st.filter),
+                Span::styled("▏", st.filter),
+            ]));
+            lines.push(Line::from(Span::styled(
+                "   #rrggbb · rgb(r,g,b) · 0-255 · ansi name · palette key   ⏎ apply  Esc back",
+                st.hidden,
+            )));
+        }
+        None => {
+            lines.push(Line::from(vec![
+                Span::styled(" ↑↓ ", st.keybar_key),
+                Span::styled(" slider ", st.keybar_label),
+                Span::styled(" ←→ ", st.keybar_key),
+                Span::styled(" ±1 ", st.keybar_label),
+                Span::styled(" H L ", st.keybar_key),
+                Span::styled(" ±10 ", st.keybar_label),
+                Span::styled(" PgUp PgDn ", st.keybar_key),
+                Span::styled(" ±16 ", st.keybar_label),
+                Span::styled(" Home End ", st.keybar_key),
+                Span::styled(" ends ", st.keybar_label),
+                Span::styled(" Tab ", st.keybar_key),
+                Span::styled(" RGB/HSV", st.keybar_label),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(" # ", st.keybar_key),
+                Span::styled(" hex ", st.keybar_label),
+                Span::styled(" n ", st.keybar_key),
+                Span::styled(" name/palette ", st.keybar_label),
+                Span::styled(" ⏎ ", st.keybar_key),
+                Span::styled(" apply ", st.keybar_label),
+                Span::styled(" Esc ", st.keybar_key),
+                Span::styled(" cancel", st.keybar_label),
+            ]));
+        }
+    }
+    if let Some((m, warn)) = &ed.message {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "   {}",
+                format::truncate_right(m, inner.width.saturating_sub(4) as usize)
+            ),
+            if *warn { st.warning } else { st.success },
+        )));
+    }
+    let palette: Vec<&str> = ed.doc.palette.keys().map(|k| k.as_str()).collect();
+    if !palette.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format::truncate_right(
+                &format!("   palette: {}", palette.join(" ")),
+                inner.width as usize,
+            ),
+            st.hidden,
+        )));
+    }
+    frame.render_widget(Paragraph::new(Text::from(lines)), inner);
 }
 
 fn message(frame: &mut Frame, app: &App, title: &str, body: &str, danger: bool) {

@@ -34,9 +34,17 @@ pub struct Cli {
     #[arg(long)]
     pub tree: bool,
 
-    /// Stay on the same filesystem as the scanned directory
-    #[arg(short = 'x', long)]
+    /// Stay on the scanned directory's volume (the default)
+    #[arg(short = 'x', long, conflicts_with = "cross_volumes")]
     pub one_file_system: bool,
+
+    /// Descend into other mounted volumes instead of listing them as mount points
+    #[arg(short = 'X', long)]
+    pub cross_volumes: bool,
+
+    /// Start on the volumes screen (every mounted and unmounted volume)
+    #[arg(long)]
+    pub volumes: bool,
 
     /// Exclude entries matching this glob (repeatable)
     #[arg(long, value_name = "GLOB")]

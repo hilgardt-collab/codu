@@ -17,6 +17,7 @@ use crate::icons::{self, IconMode, IconSet};
 use crate::scan::{self, Kind, Node, Progress, ScanOptions};
 use crate::theme::{self, Theme, ThemeInfo};
 use crate::theme_editor::{Attr, Field, ThemeEditor};
+use crate::volumes::{self, Volume};
 
 /// One row of the list view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,6 +112,42 @@ pub struct StatusMsg {
     pub until: Instant,
 }
 
+/// The volumes screen: every mounted and unmounted volume on the system.
+pub struct VolumesView {
+    pub list: Vec<Volume>,
+    pub cursor: usize,
+    pub scroll: usize,
+}
+
+impl VolumesView {
+    pub fn load() -> VolumesView {
+        let list = volumes::list();
+        let cursor = list.iter().position(|v| v.mounted()).unwrap_or(0);
+        VolumesView {
+            list,
+            cursor,
+            scroll: 0,
+        }
+    }
+
+    pub fn selected(&self) -> Option<&Volume> {
+        self.list.get(self.cursor)
+    }
+
+    /// Keep the cursor inside a window of `height` rows.
+    pub fn ensure_visible(&mut self, height: usize) {
+        if height == 0 {
+            return;
+        }
+        if self.cursor < self.scroll {
+            self.scroll = self.cursor;
+        } else if self.cursor >= self.scroll + height {
+            self.scroll = self.cursor + 1 - height;
+        }
+        self.scroll = self.scroll.min(self.list.len().saturating_sub(height));
+    }
+}
+
 /// Sorting/filtering parameters shared by both views.
 struct ListOpts {
     sort: SortKey,
@@ -132,6 +169,10 @@ pub struct App {
 
     pub root_path: PathBuf,
     pub tree: Option<Node>,
+    /// When set, the volumes screen replaces the browser.
+    pub volumes: Option<VolumesView>,
+    /// Mounted volumes, for annotating mount points inside a scan.
+    pub mounts: Vec<Volume>,
     pub view: View,
     /// List view: child indices from the root down to the current directory.
     pub path: Vec<usize>,
@@ -183,10 +224,13 @@ impl App {
         icons: IconSet,
         root_path: PathBuf,
         scan_options: ScanOptions,
+        start_in_volumes: bool,
     ) -> App {
         let themes = theme::available_themes();
         let mut app = App {
             view: config.view,
+            volumes: None,
+            mounts: volumes::mounted(),
             sort: config.sort,
             sort_reverse: config.sort_reverse,
             dirs_first: config.dirs_first,
@@ -224,8 +268,12 @@ impl App {
             tick: 0,
             last_click: None,
         };
-        let root = app.root_path.clone();
-        app.start_scan(root, Vec::new(), None, None);
+        if start_in_volumes {
+            app.open_volumes();
+        } else {
+            let root = app.root_path.clone();
+            app.start_scan(root, Vec::new(), None, None);
+        }
         app
     }
 
@@ -287,6 +335,7 @@ impl App {
                 if let Some(new_root) = job.new_root {
                     node.expanded = true;
                     self.root_path = new_root;
+                    self.volumes = None;
                     self.tree = Some(node);
                     self.path.clear();
                     self.rebuild();
@@ -737,7 +786,7 @@ impl App {
             return;
         }
         let Some(parent) = self.root_path.parent().map(|p| p.to_path_buf()) else {
-            self.set_status("already at the filesystem root".into(), true);
+            self.open_volumes();
             return;
         };
         let name = self
@@ -1038,7 +1087,7 @@ impl App {
 
         if self.is_scanning() {
             if key.code == KeyCode::Esc {
-                if self.tree.is_none() {
+                if self.tree.is_none() && self.volumes.is_none() {
                     self.should_quit = true;
                 } else {
                     self.cancel_scan();
@@ -1050,6 +1099,11 @@ impl App {
 
         if !matches!(self.popup, Popup::None) {
             self.on_popup_key(key);
+            return;
+        }
+
+        if self.volumes.is_some() {
+            self.on_volumes_key(key);
             return;
         }
 
@@ -1111,6 +1165,7 @@ impl App {
                 self.rebuild();
             }
             KeyCode::Char('o') => self.popup = Popup::Options,
+            KeyCode::Char('V') => self.open_volumes(),
             KeyCode::Char('a') => {
                 self.apparent = !self.apparent;
                 self.rebuild();
@@ -1313,6 +1368,7 @@ impl App {
                     self.rebuild();
                 }
                 KeyCode::Char('B') => self.config.borders = !self.config.borders,
+                KeyCode::Char('k') => self.config.key_guide = self.config.key_guide.next(),
                 KeyCode::Char('v') | KeyCode::Tab => self.switch_view(),
                 KeyCode::Esc | KeyCode::Char('o') | KeyCode::Enter => self.popup = Popup::None,
                 _ => {}
@@ -1323,6 +1379,105 @@ impl App {
                     self.should_quit = true;
                 }
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Volumes screen
+
+    /// Show every mounted and unmounted volume. Reached from `..` at the
+    /// filesystem root, with `V`, or `--volumes`.
+    pub fn open_volumes(&mut self) {
+        let view = VolumesView::load();
+        self.mounts = view.list.iter().filter(|v| v.mounted()).cloned().collect();
+        if !volumes::supported() {
+            self.set_status("volume listing is only available on Linux".into(), true);
+        }
+        self.volumes = Some(view);
+        self.filter_editing = false;
+    }
+
+    /// The mounted volume at exactly `path`, if any.
+    pub fn volume_for(&self, path: &std::path::Path) -> Option<&Volume> {
+        volumes::at(&self.mounts, path)
+    }
+
+    /// Enter on the volumes screen: scan a mounted volume as the new root.
+    fn scan_selected_volume(&mut self) {
+        let Some(view) = &self.volumes else { return };
+        let Some(vol) = view.selected() else { return };
+        match &vol.mount_point {
+            Some(mp) => {
+                let mp = mp.clone();
+                self.start_scan(mp.clone(), Vec::new(), Some(mp), None);
+            }
+            None => {
+                let hint = if vol.kind == volumes::VolumeKind::Swap {
+                    "swap space has no files to scan".to_string()
+                } else {
+                    format!(
+                        "{} is not mounted; mount it first (e.g. udisksctl mount -b {})",
+                        vol.device, vol.device
+                    )
+                };
+                self.set_status(hint, true);
+            }
+        }
+    }
+
+    fn on_volumes_key(&mut self, key: KeyEvent) {
+        let Some(view) = self.volumes.as_mut() else {
+            return;
+        };
+        let n = view.list.len();
+        let page = (self.list_area.height as usize).max(1);
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => view.cursor = view.cursor.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => {
+                view.cursor = (view.cursor + 1).min(n.saturating_sub(1));
+            }
+            KeyCode::PageUp => view.cursor = view.cursor.saturating_sub(page),
+            KeyCode::PageDown => view.cursor = (view.cursor + page).min(n.saturating_sub(1)),
+            KeyCode::Home | KeyCode::Char('g') => view.cursor = 0,
+            KeyCode::End | KeyCode::Char('G') => view.cursor = n.saturating_sub(1),
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => self.scan_selected_volume(),
+            KeyCode::Char('r') => {
+                let keep = view.selected().map(|v| v.device.clone());
+                let mut fresh = VolumesView::load();
+                if let Some(d) = keep
+                    && let Some(pos) = fresh.list.iter().position(|v| v.device == d)
+                {
+                    fresh.cursor = pos;
+                }
+                self.mounts = fresh.list.iter().filter(|v| v.mounted()).cloned().collect();
+                self.volumes = Some(fresh);
+                self.set_status("volumes refreshed".into(), false);
+            }
+            KeyCode::Char('?') | KeyCode::F(1) => self.popup = Popup::Help { scroll: 0 },
+            KeyCode::Char('T') => {
+                let cursor = self
+                    .themes
+                    .iter()
+                    .position(|t| t.id == self.theme.id)
+                    .unwrap_or(0);
+                self.popup = Popup::Themes {
+                    cursor,
+                    original: Box::new(self.theme.clone()),
+                    prompt: None,
+                };
+            }
+            KeyCode::Esc
+            | KeyCode::Char('V')
+            | KeyCode::Left
+            | KeyCode::Char('h')
+            | KeyCode::Backspace => {
+                if self.tree.is_some() {
+                    self.volumes = None;
+                } else if key.code == KeyCode::Esc {
+                    self.should_quit = true;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1368,7 +1523,70 @@ impl App {
         let mut close = false;
         let mut revert = false;
 
-        if let Some(prompt) = ed.prompt.as_mut() {
+        if let Some(picker) = ed.picker.as_mut() {
+            let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+            if let Some(entry) = picker.entry.as_mut() {
+                match key.code {
+                    KeyCode::Esc => picker.entry = None,
+                    KeyCode::Enter => {
+                        ed.picker_entry_commit();
+                    }
+                    KeyCode::Backspace => {
+                        entry.pop();
+                    }
+                    KeyCode::Char(c) if !ctrl => entry.push(c),
+                    _ => {}
+                }
+            } else {
+                let mut changed = true;
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        picker.channel = picker.channel.saturating_sub(1);
+                        changed = false;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        picker.channel = (picker.channel + 1).min(5);
+                        changed = false;
+                    }
+                    KeyCode::Tab => {
+                        picker.channel = (picker.channel + 3) % 6;
+                        changed = false;
+                    }
+                    KeyCode::Left | KeyCode::Char('h') => {
+                        picker.adjust(if shift { -10 } else { -1 })
+                    }
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        picker.adjust(if shift { 10 } else { 1 })
+                    }
+                    KeyCode::Char('H') => picker.adjust(-10),
+                    KeyCode::Char('L') => picker.adjust(10),
+                    KeyCode::PageDown => picker.adjust(-16),
+                    KeyCode::PageUp => picker.adjust(16),
+                    KeyCode::Home => picker.set_extreme(false),
+                    KeyCode::End => picker.set_extreme(true),
+                    KeyCode::Char('#') | KeyCode::Char('x') => {
+                        picker.entry = Some("#".into());
+                        changed = false;
+                    }
+                    KeyCode::Char('n') | KeyCode::Char('p') => {
+                        picker.entry = Some(String::new());
+                        changed = false;
+                    }
+                    KeyCode::Enter => {
+                        ed.picker_apply();
+                        changed = false;
+                    }
+                    KeyCode::Esc => {
+                        ed.picker_cancel();
+                        changed = false;
+                    }
+                    _ => changed = false,
+                }
+                if changed {
+                    ed.picker_store();
+                }
+            }
+        } else if let Some(prompt) = ed.prompt.as_mut() {
             match key.code {
                 KeyCode::Esc => ed.cancel_prompt(),
                 KeyCode::Enter => {
@@ -1389,8 +1607,10 @@ impl App {
                 KeyCode::Home => ed.move_cursor(-(ed.rows.len() as isize)),
                 KeyCode::End => ed.move_cursor(ed.rows.len() as isize),
                 KeyCode::Enter => ed.activate(),
-                KeyCode::Char('f') => ed.open_prompt(Field::Fg),
-                KeyCode::Char('g') => ed.open_prompt(Field::Bg),
+                KeyCode::Char('f') => ed.open_picker(Field::Fg),
+                KeyCode::Char('g') => ed.open_picker(Field::Bg),
+                KeyCode::Char('F') => ed.open_prompt(Field::Fg),
+                KeyCode::Char('G') => ed.open_prompt(Field::Bg),
                 KeyCode::Char('b') => ed.toggle_attr(Attr::Bold),
                 KeyCode::Char('i') => ed.toggle_attr(Attr::Italic),
                 KeyCode::Char('u') => ed.toggle_attr(Attr::Underline),
@@ -1439,6 +1659,36 @@ impl App {
 
     pub fn on_mouse(&mut self, ev: MouseEvent) {
         if self.is_scanning() || !matches!(self.popup, Popup::None) {
+            return;
+        }
+        if let Some(view) = self.volumes.as_mut() {
+            let a = self.list_area;
+            match ev.kind {
+                MouseEventKind::ScrollDown => {
+                    view.cursor = (view.cursor + 3).min(view.list.len().saturating_sub(1));
+                }
+                MouseEventKind::ScrollUp => view.cursor = view.cursor.saturating_sub(3),
+                MouseEventKind::Down(MouseButton::Left)
+                    if ev.column >= a.x
+                        && ev.column < a.x + a.width
+                        && ev.row >= a.y
+                        && ev.row < a.y + a.height =>
+                {
+                    let row = view.scroll + (ev.row - a.y) as usize;
+                    if row < view.list.len() {
+                        let now = Instant::now();
+                        let double = matches!(self.last_click, Some((r, t)) if r == row && now.duration_since(t) < DOUBLE_CLICK);
+                        view.cursor = row;
+                        if double {
+                            self.last_click = None;
+                            self.scan_selected_volume();
+                        } else {
+                            self.last_click = Some((row, now));
+                        }
+                    }
+                }
+                _ => {}
+            }
             return;
         }
         match ev.kind {
@@ -1709,6 +1959,8 @@ mod tests {
             themes: vec![],
             root_path: PathBuf::from("/root"),
             tree: Some(tree),
+            volumes: None,
+            mounts: vec![],
             path: vec![],
             rows: vec![],
             tree_rows: vec![],

@@ -61,6 +61,7 @@ filter        = { fg = "yellow", bold = true }
 tree_guide    = { fg = "comment" }
 tree_toggle   = { fg = "pink", bold = true }
 group         = { fg = "comment", italic = true }
+mount         = { fg = "cyan" }
 
 [bar]
 gradient = true

@@ -114,6 +114,13 @@ impl ThemeDoc {
                 ("special", &i.special),
                 ("error", &i.error),
                 ("empty_dir", &i.empty_dir),
+                ("mount", &i.mount),
+                ("volume", &i.volume),
+                ("removable", &i.removable),
+                ("network", &i.network),
+                ("optical", &i.optical),
+                ("swap", &i.swap),
+                ("unmounted", &i.unmounted),
             ] {
                 if let Some(v) = v {
                     lines.push(format!("{name} = {}", q(v)));
@@ -228,6 +235,13 @@ pub struct IconsDef {
     pub special: Option<String>,
     pub error: Option<String>,
     pub empty_dir: Option<String>,
+    pub mount: Option<String>,
+    pub volume: Option<String>,
+    pub removable: Option<String>,
+    pub network: Option<String>,
+    pub optical: Option<String>,
+    pub swap: Option<String>,
+    pub unmounted: Option<String>,
     pub spinner: Option<Vec<String>>,
     #[serde(default)]
     pub ext: BTreeMap<String, String>,
@@ -283,6 +297,7 @@ define_styles! {
     filter,
     tree_guide, tree_toggle,
     group,
+    mount,
 }
 
 #[derive(Clone, Debug)]
@@ -461,7 +476,8 @@ fn merge_icons(into: &mut IconsDef, from: IconsDef) {
         ($($f:ident),*) => { $( if from.$f.is_some() { into.$f = from.$f; } )* };
     }
     take!(
-        app, dir, dir_open, parent, file, symlink, hidden, special, error, empty_dir, spinner
+        app, dir, dir_open, parent, file, symlink, hidden, special, error, empty_dir, mount,
+        volume, removable, network, optical, swap, unmounted, spinner
     );
     into.ext.extend(from.ext);
     into.names.extend(from.names);

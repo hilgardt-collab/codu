@@ -3,6 +3,7 @@
 mod browser;
 mod popups;
 mod scanning;
+mod volumes;
 
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -17,11 +18,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .buffer_mut()
         .set_style(area, app.theme.styles.background);
 
-    if app.tree.is_some() {
+    let drew_screen = if app.volumes.is_some() {
+        volumes::draw(frame, app);
+        true
+    } else if app.tree.is_some() {
         browser::draw(frame, app);
-    }
+        true
+    } else {
+        false
+    };
     if app.is_scanning() {
-        if app.tree.is_some() {
+        if drew_screen {
             dim(frame.buffer_mut(), area);
         }
         scanning::draw(frame, app);
@@ -125,6 +132,7 @@ pub mod tests {
             icon_set,
             PathBuf::from("/home/user/Documents"),
             ScanOptions::default(),
+            false,
         );
         // Discard the real background scan and install the fixture.
         app.scan = None;
@@ -177,14 +185,24 @@ pub mod tests {
         assert!(screen.contains("11.5 GiB"));
         assert!(screen.contains("📂 .."));
         assert!(screen.contains("2/8"));
-        assert!(screen.contains("↑↓  move"));
-        assert!(render(&mut app, 190, 16).contains("Esc  quit"));
+        assert!(screen.contains("↑↓ jk  move"));
+        // The full guide wraps: every shortcut is visible even at 100 columns.
+        for key in [
+            "Esc  quit",
+            "D  trash",
+            "y  by type",
+            "?  help",
+            "Tab  tree view",
+        ] {
+            assert!(screen.contains(key), "missing {key}:\n{screen}");
+        }
+        assert!(!screen.contains("expand all"));
     }
 
     #[test]
     fn rows_stay_aligned_with_emoji_icons() {
         let mut app = app_for(sample_tree(), "nord", IconMode::Emoji);
-        let screen = render(&mut app, 90, 14);
+        let screen = render(&mut app, 90, 20);
         // Every entry row must have its size unit in the same column.
         let cols: Vec<usize> = screen
             .lines()
@@ -209,7 +227,7 @@ pub mod tests {
         let mut app = app_for(sample_tree(), "ansi", IconMode::Ascii);
         app.show_count = true;
         app.show_mtime = true;
-        let screen = render(&mut app, 44, 12);
+        let screen = render(&mut app, 44, 26);
         println!("{screen}");
         assert!(screen.contains("GitHub"));
         assert!(
@@ -230,7 +248,7 @@ pub mod tests {
             ratatui::crossterm::event::KeyCode::Char('+'),
             ratatui::crossterm::event::KeyModifiers::NONE,
         ));
-        let screen = render(&mut app, 100, 16);
+        let screen = render(&mut app, 100, 22);
         println!("{screen}");
         assert!(screen.contains("- 📂 /home/user/Documents"));
         assert!(screen.contains("├─- 📂 GitHub"));
@@ -240,7 +258,7 @@ pub mod tests {
         assert!(screen.contains("├─+ 📁 secret") || screen.contains("├─+ ❗ secret"));
         assert!(screen.contains("└─  🔗 link"));
         assert!(screen.contains("tree"));
-        assert!(screen.contains("+ -  expand/collapse"));
+        assert!(screen.contains("+ →  expand") && screen.contains("- ←  collapse"));
         // Size column stays aligned regardless of depth.
         let cols: Vec<usize> = screen
             .lines()
@@ -296,11 +314,29 @@ pub mod tests {
         for _ in 0..8 {
             app.on_key(k(KeyCode::Down));
         }
+        // f opens the slider picker; # starts typed entry inside it.
         app.on_key(k(KeyCode::Char('f')));
+        let s = render(&mut app, 100, 30);
+        println!("{s}");
+        assert!(s.contains("Colour: marker foreground"), "{s}");
+        assert!(
+            s.contains("▸ R") && s.contains("value mauve") && s.contains("preview"),
+            "{s}"
+        );
         for c in "#ff0000".chars() {
             app.on_key(k(KeyCode::Char(c)));
         }
-        app.on_key(k(KeyCode::Enter));
+        app.on_key(k(KeyCode::Enter)); // commit the typed value into the sliders
+        let s = render(&mut app, 100, 30);
+        assert!(s.contains("value #ff0000") && s.contains("255"), "{s}");
+        // Sliders: nudge blue up, then apply.
+        app.on_key(k(KeyCode::Down));
+        app.on_key(k(KeyCode::Down));
+        app.on_key(k(KeyCode::Right));
+        let s = render(&mut app, 100, 30);
+        assert!(s.contains("value #ff0001"), "{s}");
+        app.on_key(k(KeyCode::Left));
+        app.on_key(k(KeyCode::Enter)); // apply and close the picker
         let s = render(&mut app, 100, 30);
         assert!(s.contains("#ff0000"), "{s}");
         assert!(s.contains("▸marker       #ff0000"), "{s}");
@@ -314,6 +350,118 @@ pub mod tests {
             app.theme.styles.marker.fg,
             Some(ratatui::style::Color::Rgb(0xcb, 0xa6, 0xf7))
         );
+    }
+
+    #[test]
+    fn key_guide_modes() {
+        use crate::config::KeyGuide;
+        let mut app = app_for(sample_tree(), "ansi", IconMode::Ascii);
+        let full = render(&mut app, 80, 20);
+        let guide_lines = full
+            .lines()
+            .filter(|l| l.contains("  move") || l.contains("  quit") || l.contains("  trash"))
+            .count();
+        assert!(guide_lines >= 2, "{full}");
+        assert!(full.contains("Esc  quit"));
+        // Tree view lists its own keys.
+        app.on_key(ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Tab,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+        let tree = render(&mut app, 80, 20);
+        assert!(
+            tree.contains("*  expand all") && tree.contains("Tab  list view"),
+            "{tree}"
+        );
+        // Compact: one line, truncated; Off: none.
+        app.config.key_guide = KeyGuide::Compact;
+        let compact = render(&mut app, 80, 20);
+        assert!(
+            compact.contains("↑↓ jk  move") && !compact.contains("Esc  quit"),
+            "{compact}"
+        );
+        app.config.key_guide = KeyGuide::Off;
+        let off = render(&mut app, 80, 20);
+        assert!(!off.contains("↑↓ jk  move"));
+        // A tiny terminal still keeps a list row and the status line.
+        app.config.key_guide = KeyGuide::Full;
+        let tiny = render(&mut app, 60, 6);
+        assert!(tiny.contains("cdu") && tiny.lines().count() == 6, "{tiny}");
+    }
+
+    #[test]
+    fn volumes_screen_renders_and_mount_rows_show_volume_usage() {
+        use crate::volumes::{Volume, VolumeKind};
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let k = |c: KeyCode| KeyEvent::new(c, KeyModifiers::NONE);
+        let mut tree = sample_tree();
+        tree.children[4].flags |= flags::OTHER_FS; // "secret" becomes a mount point
+        let mut app = app_for(tree, "catppuccin-mocha", IconMode::Emoji);
+        let backup = Volume {
+            device: "/dev/sdb1".into(),
+            mount_point: Some(PathBuf::from("/home/user/Documents/secret")),
+            fs_type: "ext4".into(),
+            label: Some("Backup".into()),
+            model: None,
+            total: 2_000_000_000_000,
+            used: 1_200_000_000_000,
+            kind: VolumeKind::Disk,
+            read_only: false,
+        };
+        app.mounts = vec![backup.clone()];
+        let s = render(&mut app, 100, 18);
+        println!("{s}");
+        assert!(s.contains("> 💾 secret"), "{s}");
+        assert!(
+            s.contains("1.1 TiB"),
+            "mount row shows the volume's usage:\n{s}"
+        );
+        assert!(s.contains("volume sdb1"), "{s}");
+        // A mount point without a known volume is still marked as one.
+        app.mounts.clear();
+        let s = render(&mut app, 100, 18);
+        assert!(s.contains("mount point"), "{s}");
+        assert!(s.contains("> 💾 secret"), "{s}");
+
+        // V opens the volumes screen with an injected list.
+        app.on_key(k(KeyCode::Char('V')));
+        assert!(app.volumes.is_some());
+        let view = app.volumes.as_mut().unwrap();
+        view.list = vec![
+            backup,
+            Volume {
+                device: "/dev/sdc2".into(),
+                mount_point: None,
+                fs_type: "ntfs".into(),
+                label: Some("Games".into()),
+                model: Some("Some SSD".into()),
+                total: 500_000_000_000,
+                used: 0,
+                kind: VolumeKind::Removable,
+                read_only: false,
+            },
+        ];
+        view.cursor = 0;
+        let s = render(&mut app, 110, 14);
+        println!("{s}");
+        assert!(s.contains("Volumes"));
+        assert!(
+            s.contains("💾 /home/user/Documents/se") && s.contains("sdb1") && s.contains("Backup"),
+            "{s}"
+        );
+        assert!(
+            s.contains("💤 /dev/sdc2") && s.contains("not mounted"),
+            "{s}"
+        );
+        assert!(s.contains("2 volumes") && s.contains("1 mounted"));
+        assert!(s.contains("scan volume"));
+        // Enter on the unmounted one only explains; Esc returns to the browser.
+        app.on_key(k(KeyCode::Down));
+        app.on_key(k(KeyCode::Enter));
+        assert!(app.volumes.is_some() && !app.is_scanning());
+        assert!(app.status.as_ref().unwrap().text.contains("not mounted"));
+        app.on_key(k(KeyCode::Esc));
+        assert!(app.volumes.is_none() && !app.should_quit);
     }
 
     #[test]
@@ -358,6 +506,7 @@ pub mod tests {
             icons,
             tmp.path().to_path_buf(),
             ScanOptions::default(),
+            false,
         );
         let s = render(&mut app, 80, 20);
         // Either still scanning or already finished, both must render cleanly.

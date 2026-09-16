@@ -11,20 +11,26 @@ use crate::config::View;
 use crate::format;
 use crate::scan::{Kind, Node, flags};
 use crate::theme;
+use crate::volumes::Volume;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    let area = frame.area();
+    let guide = keybar_lines(app, area.width);
+    // Always leave room for the header, at least one list row and the status.
+    let max_guide = area.height.saturating_sub(4).max(1) as usize;
+    let guide_h = guide.len().min(max_guide) as u16;
     let [header, body, status, keybar] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Fill(1),
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(guide_h),
     ])
-    .areas(frame.area());
+    .areas(area);
 
     draw_header(frame, header, app);
     draw_rows(frame, body, app);
     draw_status(frame, status, app);
-    draw_keybar(frame, keybar, app);
+    draw_keybar(frame, keybar, app, guide);
 }
 
 // ----------------------------------------------------------------------
@@ -243,7 +249,12 @@ fn draw_list_rows(frame: &mut Frame, inner: Rect, app: &App, cols: &Cols) {
                 } else {
                     0.0
                 };
-                push_metrics(&mut spans, app, node, fill, share, cols, p);
+                let mount = if node.has(flags::OTHER_FS) {
+                    app.volume_for(&app.current_path().join(&*node.name))
+                } else {
+                    None
+                };
+                push_metrics(&mut spans, app, node, mount, fill, share, cols, p);
                 let _ = name_style;
             }
         }
@@ -292,7 +303,12 @@ fn draw_tree_rows(frame: &mut Frame, inner: Rect, app: &App, cols: &Cols) {
             } else {
                 0.0
             };
-            push_metrics(&mut spans, app, node, share, share, cols, p);
+            let mount = if node.has(flags::OTHER_FS) {
+                app.volume_for(&app.fs_path(&row.path))
+            } else {
+                None
+            };
+            push_metrics(&mut spans, app, node, mount, share, share, cols, p);
         }
         Line::from(spans).render(rect, buf);
     }
@@ -399,16 +415,74 @@ fn push_entry_head<'a>(
 }
 
 /// Size, bar, percent, count and mtime columns.
+#[allow(clippy::too_many_arguments)]
 fn push_metrics<'a>(
     spans: &mut Vec<Span<'a>>,
     app: &'a App,
     node: &Node,
+    mount: Option<&Volume>,
     fill: f64,
     share: f64,
     cols: &Cols,
     p: impl Fn(Style) -> Style,
 ) {
     let st = &app.theme.styles;
+    // A mount point of a volume we know nothing about (pseudo filesystems
+    // such as /proc, or a platform without volume listing).
+    if mount.is_none() && node.has(flags::OTHER_FS) {
+        spans.push(Span::styled(format!(" {:>5} ", "-"), p(st.mount)));
+        spans.push(Span::styled(format!("{:<3}", ""), p(st.mount)));
+        if cols.bar > 0 {
+            let width = (cols.bar - 1) as usize;
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(format::fit("mount point", width), p(st.mount)));
+        }
+        if cols.percent > 0 {
+            spans.push(Span::styled(format!(" {:>6}", "-"), p(st.mount)));
+        }
+        if cols.count > 0 {
+            spans.push(Span::styled(format!(" {:>9}", ""), p(st.count)));
+        }
+        if cols.mtime > 0 {
+            let text = format::mtime(node.mtime, &app.config.date_format);
+            spans.push(Span::styled(
+                format!(" {}", format::fit(&text, (cols.mtime - 1) as usize)),
+                p(st.mtime),
+            ));
+        }
+        return;
+    }
+    // A mount point of another volume: show that volume's own usage, in the
+    // mount style, and leave the bar/percent empty since it is not part of
+    // this scan's totals.
+    if let Some(vol) = mount {
+        let (num, unit) = format::bytes(vol.used, app.si);
+        spans.push(Span::styled(format!(" {num:>5} "), p(st.mount)));
+        spans.push(Span::styled(format!("{unit:<3}"), p(st.mount)));
+        if cols.bar > 0 {
+            let width = (cols.bar - 1) as usize;
+            let label = format::truncate_right(&format!("volume {}", vol.short_device()), width);
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(format::fit(&label, width), p(st.mount)));
+        }
+        if cols.percent > 0 {
+            spans.push(Span::styled(
+                format!(" {:>6}", format::percent(vol.share())),
+                p(st.mount),
+            ));
+        }
+        if cols.count > 0 {
+            spans.push(Span::styled(format!(" {:>9}", ""), p(st.count)));
+        }
+        if cols.mtime > 0 {
+            let text = format::mtime(node.mtime, &app.config.date_format);
+            spans.push(Span::styled(
+                format!(" {}", format::fit(&text, (cols.mtime - 1) as usize)),
+                p(st.mtime),
+            ));
+        }
+        return;
+    }
     let size = node.size_of(app.apparent);
     let (num, unit) = format::bytes(size, app.si);
     spans.push(Span::styled(format!(" {num:>5} "), p(st.size)));
@@ -532,70 +606,108 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 // ----------------------------------------------------------------------
-// Key bar
+// Key guide
 
-fn draw_keybar(frame: &mut Frame, area: Rect, app: &App) {
-    let st = &app.theme.styles;
-    frame.buffer_mut().set_style(area, st.status);
-
-    let pairs: &[(&str, &str)] = if app.filter_editing {
-        &[
-            ("type", "filter"),
+/// Every shortcut that works in the current context, in display order.
+pub fn key_pairs(app: &App) -> Vec<(&'static str, &'static str)> {
+    if app.filter_editing {
+        return vec![
+            ("type", "filter text"),
             ("⏎", "apply"),
             ("Esc", "clear"),
             ("↑↓", "move"),
-        ]
-    } else if app.view == View::Tree {
-        &[
-            ("↑↓", "move"),
-            ("+ -", "expand/collapse"),
+        ];
+    }
+    let mut v: Vec<(&str, &str)> = vec![
+        ("↑↓ jk", "move"),
+        ("PgUp PgDn", "page"),
+        ("Home End", "first/last"),
+    ];
+    match app.view {
+        View::List => v.extend([("⏎ →", "open"), ("⌫ ←", "up"), ("Tab", "tree view")]),
+        View::Tree => v.extend([
+            ("⏎ Space", "toggle"),
+            ("+ →", "expand"),
+            ("- ←", "collapse"),
             ("*", "expand all"),
-            ("Tab", "list"),
-            ("s", "size"),
-            ("n", "name"),
-            ("b", "bar"),
-            ("/", "filter"),
-            ("i", "info"),
-            ("d", "delete"),
-            ("r", "rescan"),
-            ("o", "options"),
-            ("T", "theme"),
-            ("?", "help"),
-            ("Esc", "quit"),
-        ]
-    } else {
-        &[
-            ("↑↓", "move"),
-            ("⏎", "open"),
-            ("⌫", "up"),
-            ("Tab", "tree"),
-            ("s", "size"),
-            ("n", "name"),
-            ("b", "bar"),
-            ("a", "apparent"),
-            ("/", "filter"),
-            ("i", "info"),
-            ("d", "delete"),
-            ("r", "rescan"),
-            ("o", "options"),
-            ("T", "theme"),
-            ("?", "help"),
-            ("Esc", "quit"),
-        ]
-    };
+            ("⌫", "parent"),
+            ("Tab", "list view"),
+        ]),
+    }
+    v.extend([
+        ("/", "filter"),
+        ("s", "sort size"),
+        ("n", "sort name"),
+        ("C", "sort items"),
+        ("M", "sort mtime"),
+        ("t", "dirs first"),
+        ("y", "by type"),
+        ("a", "apparent"),
+        ("b", "bar"),
+        ("c", "count col"),
+        ("m", "mtime col"),
+        ("e", "hidden"),
+        ("i", "info"),
+        ("d", "delete"),
+        ("D", "trash"),
+        ("r", "rescan"),
+        ("o", "options"),
+        ("V", "volumes"),
+        ("T", "themes"),
+        ("?", "help"),
+        ("Esc", "quit"),
+    ]);
+    v
+}
 
+/// Lay the key pairs out as chips, wrapping at pair boundaries so nothing is
+/// cut mid-word. In compact mode this is a single line, truncated.
+fn keybar_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    guide_lines(app, key_pairs(app), width)
+}
+
+/// Lay out an explicit list of key pairs (shared with the volumes screen).
+pub fn guide_lines(
+    app: &App,
+    pairs: Vec<(&'static str, &'static str)>,
+    width: u16,
+) -> Vec<Line<'static>> {
+    use crate::config::KeyGuide;
+    let st = &app.theme.styles;
+    let mode = app.config.key_guide;
+    if mode == KeyGuide::Off || width == 0 {
+        return Vec::new();
+    }
+    let mut lines: Vec<Line> = Vec::new();
     let mut spans: Vec<Span> = Vec::new();
     let mut used: usize = 0;
     for (key, label) in pairs {
         let k = format!(" {key} ");
         let l = format!(" {label}  ");
         let w = format::width(&k) + format::width(&l);
-        if used + w > area.width as usize {
-            break;
+        if used + w > width as usize && used > 0 {
+            if mode == KeyGuide::Compact {
+                break;
+            }
+            lines.push(Line::from(std::mem::take(&mut spans)));
+            used = 0;
         }
         used += w;
         spans.push(Span::styled(k, st.keybar_key));
         spans.push(Span::styled(l, st.keybar_label));
     }
-    frame.render_widget(Line::from(spans), area);
+    if !spans.is_empty() {
+        lines.push(Line::from(spans));
+    }
+    lines
+}
+
+pub fn draw_keybar(frame: &mut Frame, area: Rect, app: &App, lines: Vec<Line<'static>>) {
+    if area.height == 0 {
+        return;
+    }
+    frame.buffer_mut().set_style(area, app.theme.styles.status);
+    for (i, line) in lines.into_iter().take(area.height as usize).enumerate() {
+        frame.render_widget(line, Rect::new(area.x, area.y + i as u16, area.width, 1));
+    }
 }
