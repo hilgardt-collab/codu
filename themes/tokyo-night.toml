@@ -1,0 +1,71 @@
+# cdu theme: Tokyo Night  (https://github.com/enkia/tokyo-night-vscode-theme)
+name = "Tokyo Night"
+dark = true
+
+[palette]
+bg          = "#1a1b26"
+bg_dark     = "#16161e"
+bg_highlight = "#292e42"
+terminal_black = "#414868"
+fg          = "#c0caf5"
+fg_dark     = "#a9b1d6"
+comment     = "#565f89"
+dark3       = "#545c7e"
+blue        = "#7aa2f7"
+cyan        = "#7dcfff"
+green       = "#9ece6a"
+magenta     = "#bb9af7"
+orange      = "#ff9e64"
+red         = "#f7768e"
+yellow      = "#e0af68"
+teal        = "#1abc9c"
+purple      = "#9d7cd8"
+
+[styles]
+background    = { fg = "fg", bg = "bg" }
+header        = { fg = "fg", bg = "bg_dark" }
+header_title  = { fg = "bg", bg = "blue", bold = true }
+header_path   = { fg = "cyan", bg = "bg_dark" }
+header_theme  = { fg = "comment", bg = "bg_dark", italic = true }
+border        = { fg = "terminal_black" }
+border_title  = { fg = "comment" }
+selected      = { bg = "bg_highlight", bold = true }
+marker        = { fg = "orange", bold = true }
+dir           = { fg = "blue", bold = true }
+file          = { fg = "fg_dark" }
+symlink       = { fg = "cyan" }
+special       = { fg = "magenta" }
+hidden        = { fg = "comment", italic = true }
+excluded      = { fg = "comment", dim = true }
+error         = { fg = "red", bold = true }
+flag          = { fg = "orange", bold = true }
+size          = { fg = "green" }
+size_unit     = { fg = "teal" }
+percent       = { fg = "fg_dark" }
+count         = { fg = "dark3" }
+mtime         = { fg = "dark3" }
+bar_filled    = { fg = "purple" }
+bar_empty     = { fg = "bg_highlight" }
+status        = { fg = "fg_dark", bg = "bg_dark" }
+status_accent = { fg = "fg", bold = true }
+keybar_key    = { fg = "bg", bg = "blue", bold = true }
+keybar_label  = { fg = "fg_dark" }
+popup         = { fg = "fg", bg = "bg_dark" }
+popup_border  = { fg = "magenta" }
+popup_title   = { fg = "magenta", bold = true }
+help_key      = { fg = "yellow", bold = true }
+help_desc     = { fg = "fg" }
+danger        = { fg = "red", bold = true }
+warning       = { fg = "orange" }
+success       = { fg = "green" }
+spinner       = { fg = "magenta", bold = true }
+scan_label    = { fg = "fg_dark" }
+scan_value    = { fg = "fg", bold = true }
+scan_path     = { fg = "comment" }
+filter        = { fg = "yellow", bold = true }
+
+[bar]
+gradient = true
+low      = "green"
+mid      = "yellow"
+high     = "red"

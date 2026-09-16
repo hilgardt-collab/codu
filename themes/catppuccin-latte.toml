@@ -1,0 +1,80 @@
+# cdu theme: Catppuccin Latte  (https://catppuccin.com) — light
+name = "Catppuccin Latte"
+dark = false
+
+[palette]
+rosewater = "#dc8a78"
+flamingo  = "#dd7878"
+pink      = "#ea76cb"
+mauve     = "#8839ef"
+red       = "#d20f39"
+maroon    = "#e64553"
+peach     = "#fe640b"
+yellow    = "#df8e1d"
+green     = "#40a02b"
+teal      = "#179299"
+sky       = "#04a5e5"
+sapphire  = "#209fb5"
+blue      = "#1e66f5"
+lavender  = "#7287fd"
+text      = "#4c4f69"
+subtext1  = "#5c5f77"
+subtext0  = "#6c6f85"
+overlay2  = "#7c7f93"
+overlay1  = "#8c8fa1"
+overlay0  = "#9ca0b0"
+surface2  = "#acb0be"
+surface1  = "#bcc0cc"
+surface0  = "#ccd0da"
+base      = "#eff1f5"
+mantle    = "#e6e9ef"
+crust     = "#dce0e8"
+
+[styles]
+background    = { fg = "text", bg = "base" }
+header        = { fg = "text", bg = "mantle" }
+header_title  = { fg = "base", bg = "mauve", bold = true }
+header_path   = { fg = "lavender", bg = "mantle" }
+header_theme  = { fg = "subtext0", bg = "mantle", italic = true }
+border        = { fg = "surface2" }
+border_title  = { fg = "overlay1" }
+selected      = { bg = "surface0", bold = true }
+marker        = { fg = "mauve", bold = true }
+dir           = { fg = "blue", bold = true }
+file          = { fg = "text" }
+symlink       = { fg = "teal" }
+special       = { fg = "pink" }
+hidden        = { fg = "overlay1", italic = true }
+excluded      = { fg = "overlay0", dim = true }
+error         = { fg = "red", bold = true }
+flag          = { fg = "peach", bold = true }
+size          = { fg = "green" }
+size_unit     = { fg = "teal" }
+percent       = { fg = "subtext0" }
+count         = { fg = "overlay2" }
+mtime         = { fg = "overlay2" }
+bar_filled    = { fg = "blue" }
+bar_empty     = { fg = "surface1" }
+status        = { fg = "subtext0", bg = "mantle" }
+status_accent = { fg = "lavender", bold = true }
+keybar_key    = { fg = "base", bg = "blue", bold = true }
+keybar_label  = { fg = "subtext0" }
+popup         = { fg = "text", bg = "mantle" }
+popup_border  = { fg = "mauve" }
+popup_title   = { fg = "mauve", bold = true }
+help_key      = { fg = "peach", bold = true }
+help_desc     = { fg = "text" }
+danger        = { fg = "red", bold = true }
+warning       = { fg = "peach" }
+success       = { fg = "green" }
+spinner       = { fg = "mauve", bold = true }
+scan_label    = { fg = "subtext0" }
+scan_value    = { fg = "text", bold = true }
+scan_path     = { fg = "overlay1" }
+filter        = { fg = "peach", bold = true }
+
+[bar]
+gradient = true
+low      = "green"
+mid      = "yellow"
+high     = "red"

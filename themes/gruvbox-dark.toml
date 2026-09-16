@@ -1,0 +1,70 @@
+# cdu theme: Gruvbox Dark  (https://github.com/morhetz/gruvbox)
+name = "Gruvbox Dark"
+dark = true
+
+[palette]
+bg0_h   = "#1d2021"
+bg0     = "#282828"
+bg1     = "#3c3836"
+bg2     = "#504945"
+bg3     = "#665c54"
+fg0     = "#fbf1c7"
+fg1     = "#ebdbb2"
+fg2     = "#d5c4a1"
+gray    = "#928374"
+red     = "#fb4934"
+green   = "#b8bb26"
+yellow  = "#fabd2f"
+blue    = "#83a598"
+purple  = "#d3869b"
+aqua    = "#8ec07c"
+orange  = "#fe8019"
+
+[styles]
+background    = { fg = "fg1", bg = "bg0" }
+header        = { fg = "fg1", bg = "bg1" }
+header_title  = { fg = "bg0", bg = "yellow", bold = true }
+header_path   = { fg = "aqua", bg = "bg1" }
+header_theme  = { fg = "gray", bg = "bg1", italic = true }
+border        = { fg = "bg3" }
+border_title  = { fg = "gray" }
+selected      = { bg = "bg2", bold = true }
+marker        = { fg = "orange", bold = true }
+dir           = { fg = "blue", bold = true }
+file          = { fg = "fg1" }
+symlink       = { fg = "aqua" }
+special       = { fg = "purple" }
+hidden        = { fg = "gray", italic = true }
+excluded      = { fg = "gray", dim = true }
+error         = { fg = "red", bold = true }
+flag          = { fg = "orange", bold = true }
+size          = { fg = "green" }
+size_unit     = { fg = "aqua" }
+percent       = { fg = "fg2" }
+count         = { fg = "gray" }
+mtime         = { fg = "gray" }
+bar_filled    = { fg = "yellow" }
+bar_empty     = { fg = "bg2" }
+status        = { fg = "fg2", bg = "bg1" }
+status_accent = { fg = "fg0", bold = true }
+keybar_key    = { fg = "bg0", bg = "yellow", bold = true }
+keybar_label  = { fg = "fg2" }
+popup         = { fg = "fg1", bg = "bg0_h" }
+popup_border  = { fg = "orange" }
+popup_title   = { fg = "orange", bold = true }
+help_key      = { fg = "yellow", bold = true }
+help_desc     = { fg = "fg1" }
+danger        = { fg = "red", bold = true }
+warning       = { fg = "orange" }
+success       = { fg = "green" }
+spinner       = { fg = "orange", bold = true }
+scan_label    = { fg = "fg2" }
+scan_value    = { fg = "fg0", bold = true }
+scan_path     = { fg = "gray" }
+filter        = { fg = "yellow", bold = true }
+
+[bar]
+gradient = true
+low      = "green"
+mid      = "yellow"
+high     = "red"

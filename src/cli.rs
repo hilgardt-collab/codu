@@ -1,0 +1,79 @@
+//! Command-line interface definition.
+
+use std::path::PathBuf;
+
+use clap::{Parser, ValueEnum};
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "cdu",
+    version,
+    about = "Colourful, themeable, navigable disk usage TUI",
+    long_about = "cdu scans a directory tree in parallel and lets you browse it in an \
+interactive terminal UI with ncdu-compatible keys, truecolor themes and emoji icons.\n\n\
+Configuration: $XDG_CONFIG_HOME/cdu/config.toml (see --dump-config)\n\
+Themes:        $XDG_CONFIG_HOME/cdu/themes/<name>.toml (see --list-themes, --dump-theme)"
+)]
+pub struct Cli {
+    /// Directory to scan (defaults to the current directory)
+    pub path: Option<PathBuf>,
+
+    /// Use an alternative config file
+    #[arg(short = 'c', long, value_name = "FILE")]
+    pub config: Option<PathBuf>,
+
+    /// Theme name (built-in or from the themes directory) or path to a .toml file
+    #[arg(short = 'T', long, value_name = "NAME")]
+    pub theme: Option<String>,
+
+    /// Icon set to use for the file-type column
+    #[arg(long, value_enum, value_name = "MODE")]
+    pub icons: Option<IconArg>,
+
+    /// Stay on the same filesystem as the scanned directory
+    #[arg(short = 'x', long)]
+    pub one_file_system: bool,
+
+    /// Exclude entries matching this glob (repeatable)
+    #[arg(long, value_name = "GLOB")]
+    pub exclude: Vec<String>,
+
+    /// Show apparent sizes instead of disk usage
+    #[arg(long)]
+    pub apparent_size: bool,
+
+    /// Use decimal (SI) units: kB, MB, GB
+    #[arg(long)]
+    pub si: bool,
+
+    /// Disable deleting and trashing files
+    #[arg(short = 'r', long)]
+    pub read_only: bool,
+
+    /// Disable mouse support
+    #[arg(long)]
+    pub no_mouse: bool,
+
+    /// Number of scanner threads (0 = number of CPUs)
+    #[arg(short = 't', long, value_name = "N")]
+    pub threads: Option<usize>,
+
+    /// List available themes and exit
+    #[arg(long)]
+    pub list_themes: bool,
+
+    /// Print a built-in theme's TOML to stdout and exit
+    #[arg(long, value_name = "NAME")]
+    pub dump_theme: Option<String>,
+
+    /// Print the default config.toml to stdout and exit
+    #[arg(long)]
+    pub dump_config: bool,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum IconArg {
+    Emoji,
+    Ascii,
+    None,
+}

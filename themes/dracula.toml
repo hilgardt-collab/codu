@@ -1,0 +1,66 @@
+# cdu theme: Dracula  (https://draculatheme.com)
+name = "Dracula"
+dark = true
+
+[palette]
+bg       = "#282a36"
+current  = "#44475a"
+darker   = "#21222c"
+fg       = "#f8f8f2"
+comment  = "#6272a4"
+cyan     = "#8be9fd"
+green    = "#50fa7b"
+orange   = "#ffb86c"
+pink     = "#ff79c6"
+purple   = "#bd93f9"
+red      = "#ff5555"
+yellow   = "#f1fa8c"
+
+[styles]
+background    = { fg = "fg", bg = "bg" }
+header        = { fg = "fg", bg = "darker" }
+header_title  = { fg = "bg", bg = "purple", bold = true }
+header_path   = { fg = "cyan", bg = "darker" }
+header_theme  = { fg = "comment", bg = "darker", italic = true }
+border        = { fg = "comment" }
+border_title  = { fg = "comment" }
+selected      = { bg = "current", bold = true }
+marker        = { fg = "pink", bold = true }
+dir           = { fg = "purple", bold = true }
+file          = { fg = "fg" }
+symlink       = { fg = "cyan" }
+special       = { fg = "pink" }
+hidden        = { fg = "comment", italic = true }
+excluded      = { fg = "comment", dim = true }
+error         = { fg = "red", bold = true }
+flag          = { fg = "orange", bold = true }
+size          = { fg = "green" }
+size_unit     = { fg = "cyan" }
+percent       = { fg = "comment" }
+count         = { fg = "comment" }
+mtime         = { fg = "comment" }
+bar_filled    = { fg = "purple" }
+bar_empty     = { fg = "current" }
+status        = { fg = "comment", bg = "darker" }
+status_accent = { fg = "fg", bold = true }
+keybar_key    = { fg = "bg", bg = "pink", bold = true }
+keybar_label  = { fg = "comment" }
+popup         = { fg = "fg", bg = "darker" }
+popup_border  = { fg = "purple" }
+popup_title   = { fg = "pink", bold = true }
+help_key      = { fg = "yellow", bold = true }
+help_desc     = { fg = "fg" }
+danger        = { fg = "red", bold = true }
+warning       = { fg = "orange" }
+success       = { fg = "green" }
+spinner       = { fg = "pink", bold = true }
+scan_label    = { fg = "comment" }
+scan_value    = { fg = "fg", bold = true }
+scan_path     = { fg = "comment" }
+filter        = { fg = "yellow", bold = true }
+
+[bar]
+gradient = true
+low      = "green"
+mid      = "yellow"
+high     = "red"

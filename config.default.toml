@@ -1,0 +1,60 @@
+# cdu configuration
+# Location: $XDG_CONFIG_HOME/cdu/config.toml  (usually ~/.config/cdu/config.toml)
+# Every key is optional; the values below are the defaults.
+
+# Theme name. Built-in: catppuccin-mocha, catppuccin-latte, dracula,
+# gruvbox-dark, nord, tokyo-night, solarized-light, ansi.
+# User themes live in $XDG_CONFIG_HOME/cdu/themes/<name>.toml.
+# Press T inside cdu to preview themes; `cdu --dump-theme NAME` prints one.
+theme = "catppuccin-mocha"
+
+# Icon column: "emoji", "ascii", or "none".
+icons = "emoji"
+
+# Mouse support: click to select, double-click to open, wheel to scroll.
+mouse = true
+
+# Draw a rounded frame around the file list.
+borders = true
+
+# Use decimal units (kB, MB, GB) instead of binary (KiB, MiB, GiB).
+si = false
+
+# Show apparent size instead of disk usage by default (toggle with a).
+apparent-size = false
+
+# Sort directories before files (toggle with t).
+dirs-first = false
+
+# Show dot-files and dot-directories (toggle with e).
+show-hidden = true
+
+# Show the item-count column (toggle with c) and mtime column (toggle with m).
+show-count = false
+show-mtime = false
+
+# Bar/percentage display: "bar-percent", "bar", "percent", "none" (cycle with b).
+bar-mode = "bar-percent"
+bar-width = 24
+
+# Initial sort: "size", "name", "count", "mtime". sort-reverse flips it.
+sort = "size"
+sort-reverse = false
+
+# Glob patterns to exclude from the scan (matched against names and full paths).
+exclude = []
+
+# Do not cross filesystem boundaries (same as -x).
+one-file-system = false
+
+# Scanner threads; 0 means one per CPU.
+threads = 0
+
+# Ask before deleting or trashing. Setting this to false is dangerous.
+confirm-delete = true
+
+# Disable delete/trash entirely (same as -r).
+read-only = false
+
+# strftime-style format for the mtime column.
+date-format = "%Y-%m-%d %H:%M"

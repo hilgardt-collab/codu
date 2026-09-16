@@ -1,0 +1,56 @@
+# cdu theme: ANSI
+# Uses only the terminal's own 16-colour palette, so it follows whatever
+# colour scheme your terminal already has. Every other theme inherits any
+# key it does not define from this file.
+name = "ANSI (terminal palette)"
+
+[styles]
+background    = {}
+header        = { fg = "black", bg = "blue" }
+header_title  = { fg = "black", bg = "blue", bold = true }
+header_path   = { fg = "black", bg = "blue" }
+header_theme  = { fg = "black", bg = "blue", italic = true }
+border        = { fg = "darkgray" }
+border_title  = { fg = "gray" }
+selected      = { fg = "black", bg = "cyan", bold = true }
+marker        = { fg = "black", bg = "cyan", bold = true }
+dir           = { fg = "blue", bold = true }
+file          = {}
+symlink       = { fg = "cyan" }
+special       = { fg = "magenta" }
+hidden        = { fg = "darkgray", italic = true }
+excluded      = { fg = "darkgray", dim = true }
+error         = { fg = "red", bold = true }
+flag          = { fg = "yellow", bold = true }
+size          = { fg = "green" }
+size_unit     = { fg = "green", dim = true }
+percent       = { fg = "gray" }
+count         = { fg = "gray" }
+mtime         = { fg = "gray" }
+bar_filled    = { fg = "blue" }
+bar_empty     = { fg = "darkgray" }
+status        = { fg = "gray" }
+status_accent = { fg = "white", bold = true }
+keybar_key    = { fg = "black", bg = "cyan", bold = true }
+keybar_label  = { fg = "gray" }
+popup         = {}
+popup_border  = { fg = "cyan" }
+popup_title   = { fg = "cyan", bold = true }
+help_key      = { fg = "yellow", bold = true }
+help_desc     = {}
+danger        = { fg = "red", bold = true }
+warning       = { fg = "yellow" }
+success       = { fg = "green" }
+spinner       = { fg = "cyan", bold = true }
+scan_label    = { fg = "gray" }
+scan_value    = { fg = "white", bold = true }
+scan_path     = { fg = "darkgray" }
+filter        = { fg = "yellow", bold = true }
+
+[bar]
+filled   = "█"
+empty    = "░"
+gradient = false
+low      = "green"
+mid      = "yellow"
+high     = "red"

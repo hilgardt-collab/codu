@@ -1,0 +1,70 @@
+# cdu theme: Nord  (https://www.nordtheme.com)
+name = "Nord"
+dark = true
+
+[palette]
+nord0  = "#2e3440"
+nord1  = "#3b4252"
+nord2  = "#434c5e"
+nord3  = "#4c566a"
+nord4  = "#d8dee9"
+nord5  = "#e5e9f0"
+nord6  = "#eceff4"
+nord7  = "#8fbcbb"
+nord8  = "#88c0d0"
+nord9  = "#81a1c1"
+nord10 = "#5e81ac"
+nord11 = "#bf616a"
+nord12 = "#d08770"
+nord13 = "#ebcb8b"
+nord14 = "#a3be8c"
+nord15 = "#b48ead"
+
+[styles]
+background    = { fg = "nord4", bg = "nord0" }
+header        = { fg = "nord4", bg = "nord1" }
+header_title  = { fg = "nord0", bg = "nord8", bold = true }
+header_path   = { fg = "nord8", bg = "nord1" }
+header_theme  = { fg = "nord3", bg = "nord1", italic = true }
+border        = { fg = "nord3" }
+border_title  = { fg = "nord3" }
+selected      = { bg = "nord2", bold = true }
+marker        = { fg = "nord8", bold = true }
+dir           = { fg = "nord9", bold = true }
+file          = { fg = "nord4" }
+symlink       = { fg = "nord7" }
+special       = { fg = "nord15" }
+hidden        = { fg = "nord3", italic = true }
+excluded      = { fg = "nord3", dim = true }
+error         = { fg = "nord11", bold = true }
+flag          = { fg = "nord12", bold = true }
+size          = { fg = "nord14" }
+size_unit     = { fg = "nord7" }
+percent       = { fg = "nord4" }
+count         = { fg = "nord3" }
+mtime         = { fg = "nord3" }
+bar_filled    = { fg = "nord10" }
+bar_empty     = { fg = "nord1" }
+status        = { fg = "nord4", bg = "nord1" }
+status_accent = { fg = "nord6", bold = true }
+keybar_key    = { fg = "nord0", bg = "nord8", bold = true }
+keybar_label  = { fg = "nord4" }
+popup         = { fg = "nord4", bg = "nord1" }
+popup_border  = { fg = "nord8" }
+popup_title   = { fg = "nord8", bold = true }
+help_key      = { fg = "nord13", bold = true }
+help_desc     = { fg = "nord4" }
+danger        = { fg = "nord11", bold = true }
+warning       = { fg = "nord13" }
+success       = { fg = "nord14" }
+spinner       = { fg = "nord8", bold = true }
+scan_label    = { fg = "nord4" }
+scan_value    = { fg = "nord6", bold = true }
+scan_path     = { fg = "nord3" }
+filter        = { fg = "nord13", bold = true }
+
+[bar]
+gradient = true
+low      = "nord14"
+mid      = "nord13"
+high     = "nord11"

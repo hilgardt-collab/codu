@@ -1,0 +1,70 @@
+# cdu theme: Solarized Light  (https://ethanschoonover.com/solarized)
+name = "Solarized Light"
+dark = false
+
+[palette]
+base03  = "#002b36"
+base02  = "#073642"
+base01  = "#586e75"
+base00  = "#657b83"
+base0   = "#839496"
+base1   = "#93a1a1"
+base2   = "#eee8d5"
+base3   = "#fdf6e3"
+yellow  = "#b58900"
+orange  = "#cb4b16"
+red     = "#dc322f"
+magenta = "#d33682"
+violet  = "#6c71c4"
+blue    = "#268bd2"
+cyan    = "#2aa198"
+green   = "#859900"
+
+[styles]
+background    = { fg = "base00", bg = "base3" }
+header        = { fg = "base01", bg = "base2" }
+header_title  = { fg = "base3", bg = "blue", bold = true }
+header_path   = { fg = "blue", bg = "base2" }
+header_theme  = { fg = "base1", bg = "base2", italic = true }
+border        = { fg = "base1" }
+border_title  = { fg = "base1" }
+selected      = { bg = "base2", bold = true }
+marker        = { fg = "orange", bold = true }
+dir           = { fg = "blue", bold = true }
+file          = { fg = "base00" }
+symlink       = { fg = "cyan" }
+special       = { fg = "magenta" }
+hidden        = { fg = "base1", italic = true }
+excluded      = { fg = "base1", dim = true }
+error         = { fg = "red", bold = true }
+flag          = { fg = "orange", bold = true }
+size          = { fg = "green" }
+size_unit     = { fg = "cyan" }
+percent       = { fg = "base01" }
+count         = { fg = "base1" }
+mtime         = { fg = "base1" }
+bar_filled    = { fg = "blue" }
+bar_empty     = { fg = "base2" }
+status        = { fg = "base01", bg = "base2" }
+status_accent = { fg = "base02", bold = true }
+keybar_key    = { fg = "base3", bg = "blue", bold = true }
+keybar_label  = { fg = "base01" }
+popup         = { fg = "base00", bg = "base2" }
+popup_border  = { fg = "violet" }
+popup_title   = { fg = "violet", bold = true }
+help_key      = { fg = "orange", bold = true }
+help_desc     = { fg = "base00" }
+danger        = { fg = "red", bold = true }
+warning       = { fg = "orange" }
+success       = { fg = "green" }
+spinner       = { fg = "violet", bold = true }
+scan_label    = { fg = "base01" }
+scan_value    = { fg = "base02", bold = true }
+scan_path     = { fg = "base1" }
+filter        = { fg = "orange", bold = true }
+
+[bar]
+gradient = true
+low      = "green"
+mid      = "yellow"
+high     = "red"

@@ -1,0 +1,80 @@
+# cdu theme: Catppuccin Mocha  (https://catppuccin.com)
+name = "Catppuccin Mocha"
+dark = true
+
+[palette]
+rosewater = "#f5e0dc"
+flamingo  = "#f2cdcd"
+pink      = "#f5c2e7"
+mauve     = "#cba6f7"
+red       = "#f38ba8"
+maroon    = "#eba0ac"
+peach     = "#fab387"
+yellow    = "#f9e2af"
+green     = "#a6e3a1"
+teal      = "#94e2d5"
+sky       = "#89dceb"
+sapphire  = "#74c7ec"
+blue      = "#89b4fa"
+lavender  = "#b4befe"
+text      = "#cdd6f4"
+subtext1  = "#bac2de"
+subtext0  = "#a6adc8"
+overlay2  = "#9399b2"
+overlay1  = "#7f849c"
+overlay0  = "#6c7086"
+surface2  = "#585b70"
+surface1  = "#45475a"
+surface0  = "#313244"
+base      = "#1e1e2e"
+mantle    = "#181825"
+crust     = "#11111b"
+
+[styles]
+background    = { fg = "text", bg = "base" }
+header        = { fg = "text", bg = "mantle" }
+header_title  = { fg = "base", bg = "mauve", bold = true }
+header_path   = { fg = "lavender", bg = "mantle" }
+header_theme  = { fg = "subtext0", bg = "mantle", italic = true }
+border        = { fg = "surface2" }
+border_title  = { fg = "overlay1" }
+selected      = { bg = "surface1", bold = true }
+marker        = { fg = "mauve", bold = true }
+dir           = { fg = "blue", bold = true }
+file          = { fg = "text" }
+symlink       = { fg = "teal" }
+special       = { fg = "pink" }
+hidden        = { fg = "overlay1", italic = true }
+excluded      = { fg = "overlay0", dim = true }
+error         = { fg = "red", bold = true }
+flag          = { fg = "peach", bold = true }
+size          = { fg = "green" }
+size_unit     = { fg = "teal" }
+percent       = { fg = "subtext0" }
+count         = { fg = "overlay2" }
+mtime         = { fg = "overlay2" }
+bar_filled    = { fg = "blue" }
+bar_empty     = { fg = "surface0" }
+status        = { fg = "subtext0", bg = "mantle" }
+status_accent = { fg = "lavender", bold = true }
+keybar_key    = { fg = "base", bg = "blue", bold = true }
+keybar_label  = { fg = "subtext0" }
+popup         = { fg = "text", bg = "mantle" }
+popup_border  = { fg = "mauve" }
+popup_title   = { fg = "mauve", bold = true }
+help_key      = { fg = "yellow", bold = true }
+help_desc     = { fg = "text" }
+danger        = { fg = "red", bold = true }
+warning       = { fg = "yellow" }
+success       = { fg = "green" }
+spinner       = { fg = "mauve", bold = true }
+scan_label    = { fg = "subtext0" }
+scan_value    = { fg = "text", bold = true }
+scan_path     = { fg = "overlay1" }
+filter        = { fg = "yellow", bold = true }
+
+[bar]
+gradient = true
+low      = "green"
+mid      = "yellow"
+high     = "red"
