@@ -64,6 +64,7 @@ scan_path     = { fg = "gray" }
 filter        = { fg = "yellow", bold = true }
 tree_guide    = { fg = "bg3" }
 tree_toggle   = { fg = "orange", bold = true }
+group         = { fg = "gray", italic = true }
 
 [bar]
 gradient = true

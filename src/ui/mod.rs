@@ -178,7 +178,7 @@ pub mod tests {
         assert!(screen.contains("📂 .."));
         assert!(screen.contains("2/8"));
         assert!(screen.contains("↑↓  move"));
-        assert!(render(&mut app, 170, 16).contains("Esc  quit"));
+        assert!(render(&mut app, 190, 16).contains("Esc  quit"));
     }
 
     #[test]
@@ -259,6 +259,64 @@ pub mod tests {
     }
 
     #[test]
+    fn options_editor_and_groups_render() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let k = |c: KeyCode| KeyEvent::new(c, KeyModifiers::NONE);
+        let mut app = app_for(sample_tree(), "catppuccin-mocha", IconMode::Emoji);
+        app.on_key(k(KeyCode::Char('y')));
+        let s = render(&mut app, 100, 18);
+        println!("{s}");
+        assert!(
+            s.contains("─ 🦀 rust") || s.contains("─ 📁 directories"),
+            "{s}"
+        );
+        assert!(s.contains("(by type)"));
+        // Cursor never rests on a caption.
+        assert!(app.is_selectable(app.cursor));
+
+        app.on_key(k(KeyCode::Char('o')));
+        let s = render(&mut app, 100, 24);
+        println!("{s}");
+        assert!(
+            s.contains("Options")
+                && s.contains("[x] group by type")
+                && s.contains("[ ] directories first")
+        );
+        app.on_key(k(KeyCode::Esc));
+
+        app.on_key(k(KeyCode::Char('T')));
+        app.on_key(k(KeyCode::Char('e')));
+        assert!(matches!(app.popup, crate::app::Popup::ThemeEditor(_)));
+        let s = render(&mut app, 100, 30);
+        println!("{s}");
+        assert!(s.contains("Edit theme: Catppuccin Mocha (catppuccin-mocha)"));
+        assert!(s.contains("Sample text 123"));
+        assert!(s.contains("palette:"));
+        // Edit dir fg via prompt and make sure it is live.
+        for _ in 0..8 {
+            app.on_key(k(KeyCode::Down));
+        }
+        app.on_key(k(KeyCode::Char('f')));
+        for c in "#ff0000".chars() {
+            app.on_key(k(KeyCode::Char(c)));
+        }
+        app.on_key(k(KeyCode::Enter));
+        let s = render(&mut app, 100, 30);
+        assert!(s.contains("#ff0000"), "{s}");
+        assert!(s.contains("▸marker       #ff0000"), "{s}");
+        assert!(s.contains("Edit theme: Catppuccin Mocha (catppuccin-mocha) *"));
+        // Esc once warns, Esc again discards and restores the theme.
+        app.on_key(k(KeyCode::Esc));
+        assert!(matches!(app.popup, crate::app::Popup::ThemeEditor(_)));
+        app.on_key(k(KeyCode::Esc));
+        assert!(matches!(app.popup, crate::app::Popup::None));
+        assert_eq!(
+            app.theme.styles.marker.fg,
+            Some(ratatui::style::Color::Rgb(0xcb, 0xa6, 0xf7))
+        );
+    }
+
+    #[test]
     fn popups_render() {
         let mut app = app_for(sample_tree(), "dracula", IconMode::Emoji);
         app.popup = crate::app::Popup::Help { scroll: 0 };
@@ -277,6 +335,7 @@ pub mod tests {
         app.popup = crate::app::Popup::Themes {
             cursor: 0,
             original: Box::new(app.theme.clone()),
+            prompt: None,
         };
         assert!(render(&mut app, 100, 40).contains("Themes"));
         app.popup = crate::app::Popup::Message {

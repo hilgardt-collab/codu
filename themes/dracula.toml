@@ -60,6 +60,7 @@ scan_path     = { fg = "comment" }
 filter        = { fg = "yellow", bold = true }
 tree_guide    = { fg = "comment" }
 tree_toggle   = { fg = "pink", bold = true }
+group         = { fg = "comment", italic = true }
 
 [bar]
 gradient = true

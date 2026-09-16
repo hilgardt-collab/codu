@@ -77,6 +77,7 @@ pub struct Config {
     pub si: bool,
     pub apparent_size: bool,
     pub dirs_first: bool,
+    pub group_by_type: bool,
     pub show_hidden: bool,
     pub show_count: bool,
     pub show_mtime: bool,
@@ -103,6 +104,7 @@ impl Default for Config {
             si: false,
             apparent_size: false,
             dirs_first: false,
+            group_by_type: false,
             show_hidden: true,
             show_count: false,
             show_mtime: false,
@@ -131,6 +133,61 @@ pub fn default_config_path() -> Option<PathBuf> {
 
 pub fn themes_dir() -> Option<PathBuf> {
     config_dir().map(|d| d.join("themes"))
+}
+
+/// Persist `theme = "<id>"` in the user's config.toml, creating the file from
+/// the commented default when it does not exist yet. Returns the path written.
+pub fn set_default_theme(id: &str) -> Result<PathBuf> {
+    let path = default_config_path().context("no config directory on this platform")?;
+    let existing = if path.is_file() {
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?
+    } else {
+        DEFAULT_CONFIG_TOML.to_string()
+    };
+    let line = format!("theme = {}", toml_string(id));
+    let mut replaced = false;
+    let mut out: Vec<String> = existing
+        .lines()
+        .map(|l| {
+            if !replaced
+                && l.trim_start().starts_with("theme")
+                && l.split('=').next().is_some_and(|k| k.trim() == "theme")
+            {
+                replaced = true;
+                line.clone()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    if !replaced {
+        out.insert(0, line);
+    }
+    let mut text = out.join("\n");
+    text.push('\n');
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
+}
+
+/// Quote a string as a TOML basic string.
+pub fn toml_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 impl Config {
@@ -174,6 +231,15 @@ mod tests {
         assert_eq!(c.theme, "nord");
         assert_eq!(c.bar_width, 10);
         assert!(c.mouse);
+    }
+
+    #[test]
+    fn toml_string_escapes() {
+        assert_eq!(toml_string("plain"), "\"plain\"");
+        assert_eq!(toml_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
+        let parsed: toml::Value =
+            toml::from_str(&format!("x = {}", toml_string("q\"\\\n"))).unwrap();
+        assert_eq!(parsed["x"].as_str(), Some("q\"\\\n"));
     }
 
     #[test]

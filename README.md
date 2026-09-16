@@ -35,6 +35,12 @@ restyle every part of the interface.
   Nord, Tokyo Night, Solarized Light, and a 16-colour `ansi` fallback), a
   live in-app picker, and TOML theme files where every UI element, the bar
   glyphs and gradient, and every icon can be changed.
+- **In-app theme editor**: copy any theme, edit every element's colours and
+  attributes with live preview, save it to your themes directory, and set it
+  as the default, all without leaving cdu.
+- **Group by type**: one keypress splits a listing into captioned sections
+  (directories, images, video, archives, code, ...). An options popup lists
+  every view toggle with its current state.
 - **Emoji icons** chosen so columns never misalign, with `ascii` and `none`
   modes for terminals without emoji fonts.
 - Disk usage or apparent size, binary or SI units, hard-link deduplication,
@@ -92,6 +98,8 @@ cdu [OPTIONS] [PATH]
 | **Sort & view**            |                                                       |
 | `s` `n` `C` `M`            | sort by size / name / items / mtime (again: reverse)  |
 | `t`                        | directories first                                     |
+| `y`                        | group by type (captioned sections)                    |
+| `o`                        | options popup: all view toggles with their state      |
 | `a`                        | disk usage ↔ apparent size                            |
 | `b`                        | bar+percent → bar → percent → none                    |
 | `c` `m`                    | item-count / mtime column                             |
@@ -100,13 +108,31 @@ cdu [OPTIONS] [PATH]
 | `i`                        | info popup                                            |
 | `d` / `D`                  | delete permanently / move to trash (asks first)       |
 | `r`                        | rescan (list: current directory; tree: selected)      |
-| `T`                        | theme picker with live preview                        |
+| `T`                        | theme picker: `e` edit, `n` new copy, `S` set default |
 | `?` `F1`                   | help                                                  |
 | `Esc` `Ctrl-C`             | quit (`Esc` first closes popups / clears the filter)  |
 
 Entry flags follow ncdu: `!` unreadable, `.` unreadable subdirectory,
 `<` excluded, `>` other filesystem, `@` symlink/special, `H` hard link
 counted elsewhere, `e` empty directory.
+
+### Group by type
+
+`y` splits the current listing into captioned sections so you can see at a
+glance how much space each kind of file takes. Groups are ordered by their
+total size (or by name when sorting by name), directories keep their own
+group, and `t` still pins that group to the top. Captions are skipped by the
+cursor. In the tree view the same grouping orders each directory's children
+without caption rows.
+
+```
+│    📂 ..                                                                    │
+│  ─ 🎬 video · 3 · 1.4 GiB ──────────────────────────────────────────────────│
+│▸   🎬 talk.mkv                     774 MiB ████████████████████████  38.2%  │
+│    🎬 demo.mp4                     512 MiB ████████████████░░░░░░░░  25.3%  │
+│  ─ 📷 images · 12 · 380 MiB ────────────────────────────────────────────────│
+│    📷 wallpaper.png                 96 MiB ███░░░░░░░░░░░░░░░░░░░░░   4.7%  │
+```
 
 ### Tree view
 
@@ -151,6 +177,7 @@ show-count = false
 show-mtime = false
 bar-mode = "bar-percent" # bar-percent | bar | percent | none
 bar-width = 24
+group-by-type = false
 sort = "size"            # size | name | count | mtime
 sort-reverse = false
 exclude = []
@@ -162,6 +189,45 @@ date-format = "%Y-%m-%d %H:%M"
 ```
 
 ## Theming
+
+### Editing themes inside cdu
+
+Press `T` for the theme picker, move to any theme and press `n` to create
+a copy under a name you choose, or `e` to edit the selected theme directly.
+The editor lists every element with its foreground, background, attributes
+and a live sample, and everything you change is applied to the screen behind
+it immediately.
+
+```
+╭ 🎨 Edit theme: My Nord (my-nord) * ───────────────────────────────────────────╮
+│ element       fg           bg           attrs   preview                       │
+│ name         My Nord                                                         │
+│ dark         yes                                                             │
+│ background   nord4        nord0        ······   Sample text 123              │
+│▸dir          #ff8800      -            B·····   Sample text 123              │
+│ file         nord4        -            ······   Sample text 123              │
+│ ...                                                                          │
+│ f  fg  g  bg  b i u d r x  bold italic underline dim reversed strike  Del ...│
+│ ⏎  edit/toggle  s  save  Esc  close                                          │
+│ palette: nord0 nord1 nord2 nord3 nord4 nord5 nord6 nord7 nord8 nord9 nord10 …│
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+| Key                 | Action                                                  |
+|---------------------|---------------------------------------------------------|
+| `↑` `↓`             | choose an element                                       |
+| `f` / `g`           | type a foreground / background colour (`none` inherits) |
+| `b` `i` `u` `d` `r` `x` | toggle bold, italic, underline, dim, reversed, strike |
+| `Del`               | clear the element so it inherits from the base theme    |
+| `⏎`                 | edit the natural value of the row (name, dark, colours) |
+| `s`                 | save to `~/.config/cdu/themes/<id>.toml`                |
+| `Esc`               | close (asks once if there are unsaved changes)          |
+
+`S` in the picker writes `theme = "<id>"` to your `config.toml` so the theme
+loads next time. Editing a built-in theme saves a user copy with the same id,
+which shadows the built-in from then on.
+
+### Theme files by hand
 
 Themes are TOML files in `~/.config/cdu/themes/<name>.toml` (user themes
 shadow built-in ones with the same name). Start from a built-in:
@@ -183,7 +249,7 @@ dark = true                       # picks the 🌙 / 🌞 header badge
 blue = "#89b4fa"
 base = "#1e1e2e"
 
-[styles]                          # any of the 43 element keys
+[styles]                          # any of the 44 element keys
 background = { bg = "base" }
 dir        = { fg = "blue", bold = true }
 selected   = { bg = "#45475a", bold = true }
@@ -217,7 +283,7 @@ border_title selected marker dir file symlink special hidden excluded error
 flag size size_unit percent count mtime bar_filled bar_empty status
 status_accent keybar_key keybar_label popup popup_border popup_title help_key
 help_desc danger warning success spinner scan_label scan_value scan_path
-filter tree_guide tree_toggle`.
+filter tree_guide tree_toggle group`.
 
 ### About emoji widths
 

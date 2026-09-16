@@ -64,6 +64,7 @@ scan_path     = { fg = "nord3" }
 filter        = { fg = "nord13", bold = true }
 tree_guide    = { fg = "nord3" }
 tree_toggle   = { fg = "nord8", bold = true }
+group         = { fg = "nord3", italic = true }
 
 [bar]
 gradient = true

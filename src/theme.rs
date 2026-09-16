@@ -33,21 +33,133 @@ pub const BUILTIN: &[(&str, &str)] = &[
 // ---------------------------------------------------------------------------
 // Raw file model
 
-#[derive(Debug, Default, Deserialize)]
-struct ThemeFile {
-    name: Option<String>,
-    dark: Option<bool>,
+/// The raw, editable form of a theme: exactly what the TOML file holds.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ThemeDoc {
+    pub name: Option<String>,
+    pub dark: Option<bool>,
     #[serde(default)]
-    palette: BTreeMap<String, String>,
+    pub palette: BTreeMap<String, String>,
     #[serde(default)]
-    styles: BTreeMap<String, StyleDef>,
+    pub styles: BTreeMap<String, StyleDef>,
     #[serde(default)]
-    bar: BarDef,
+    pub bar: BarDef,
     #[serde(default)]
-    icons: IconsDef,
+    pub icons: IconsDef,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+impl ThemeDoc {
+    /// Serialize in the same compact layout as the built-in theme files.
+    pub fn to_toml(&self) -> String {
+        use crate::config::toml_string as q;
+        let mut out = String::new();
+        if let Some(n) = &self.name {
+            out.push_str(&format!("name = {}\n", q(n)));
+        }
+        if let Some(d) = self.dark {
+            out.push_str(&format!("dark = {d}\n"));
+        }
+        if !self.palette.is_empty() {
+            out.push_str("\n[palette]\n");
+            for (k, v) in &self.palette {
+                out.push_str(&format!("{} = {}\n", key(k), q(v)));
+            }
+        }
+        if !self.styles.is_empty() {
+            out.push_str("\n[styles]\n");
+            for (k, def) in &self.styles {
+                out.push_str(&format!("{:<14}= {}\n", key(k), def.to_inline()));
+            }
+        }
+        {
+            let b = &self.bar;
+            let mut lines = Vec::new();
+            if let Some(v) = &b.filled {
+                lines.push(format!("filled   = {}", q(v)));
+            }
+            if let Some(v) = &b.empty {
+                lines.push(format!("empty    = {}", q(v)));
+            }
+            if let Some(v) = b.gradient {
+                lines.push(format!("gradient = {v}"));
+            }
+            if let Some(v) = &b.low {
+                lines.push(format!("low      = {}", q(v)));
+            }
+            if let Some(v) = &b.mid {
+                lines.push(format!("mid      = {}", q(v)));
+            }
+            if let Some(v) = &b.high {
+                lines.push(format!("high     = {}", q(v)));
+            }
+            if !lines.is_empty() {
+                out.push_str("\n[bar]\n");
+                for l in lines {
+                    out.push_str(&l);
+                    out.push('\n');
+                }
+            }
+        }
+        {
+            let i = &self.icons;
+            let mut lines = Vec::new();
+            for (name, v) in [
+                ("app", &i.app),
+                ("dir", &i.dir),
+                ("dir_open", &i.dir_open),
+                ("parent", &i.parent),
+                ("file", &i.file),
+                ("symlink", &i.symlink),
+                ("hidden", &i.hidden),
+                ("special", &i.special),
+                ("error", &i.error),
+                ("empty_dir", &i.empty_dir),
+            ] {
+                if let Some(v) = v {
+                    lines.push(format!("{name} = {}", q(v)));
+                }
+            }
+            if let Some(sp) = &i.spinner {
+                let items: Vec<String> = sp.iter().map(|f| q(f)).collect();
+                lines.push(format!("spinner = [{}]", items.join(", ")));
+            }
+            if !lines.is_empty() {
+                out.push_str("\n[icons]\n");
+                for l in lines {
+                    out.push_str(&l);
+                    out.push('\n');
+                }
+            }
+            if !i.ext.is_empty() {
+                out.push_str("\n[icons.ext]\n");
+                for (k, v) in &i.ext {
+                    out.push_str(&format!("{} = {}\n", key(k), q(v)));
+                }
+            }
+            if !i.names.is_empty() {
+                out.push_str("\n[icons.names]\n");
+                for (k, v) in &i.names {
+                    out.push_str(&format!("{} = {}\n", key(k), q(v)));
+                }
+            }
+        }
+        out
+    }
+}
+
+/// A TOML key: bare when possible, quoted otherwise.
+fn key(k: &str) -> String {
+    if !k.is_empty()
+        && k.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        k.to_string()
+    } else {
+        crate::config::toml_string(k)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct StyleDef {
     pub fg: Option<String>,
@@ -58,6 +170,37 @@ pub struct StyleDef {
     pub underline: Option<bool>,
     pub reversed: Option<bool>,
     pub crossed_out: Option<bool>,
+}
+
+impl StyleDef {
+    /// `{ fg = "...", bold = true }` as written in theme files.
+    pub fn to_inline(&self) -> String {
+        use crate::config::toml_string as q;
+        let mut parts = Vec::new();
+        if let Some(v) = &self.fg {
+            parts.push(format!("fg = {}", q(v)));
+        }
+        if let Some(v) = &self.bg {
+            parts.push(format!("bg = {}", q(v)));
+        }
+        for (name, v) in [
+            ("bold", self.bold),
+            ("dim", self.dim),
+            ("italic", self.italic),
+            ("underline", self.underline),
+            ("reversed", self.reversed),
+            ("crossed_out", self.crossed_out),
+        ] {
+            if let Some(v) = v {
+                parts.push(format!("{name} = {v}"));
+            }
+        }
+        if parts.is_empty() {
+            "{}".to_string()
+        } else {
+            format!("{{ {} }}", parts.join(", "))
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -104,13 +247,20 @@ macro_rules! define_styles {
         }
 
         impl Styles {
-            #[allow(dead_code)]
             pub const KEYS: &'static [&'static str] = &[$(stringify!($name)),*];
 
             fn set(&mut self, key: &str, style: Style) -> bool {
                 match key {
                     $(stringify!($name) => { self.$name = style; true })*
                     _ => false,
+                }
+            }
+
+            /// Look a style up by its theme-file key.
+            pub fn get(&self, key: &str) -> Option<Style> {
+                match key {
+                    $(stringify!($name) => Some(self.$name),)*
+                    _ => None,
                 }
             }
         }
@@ -132,6 +282,7 @@ define_styles! {
     spinner, scan_label, scan_value, scan_path,
     filter,
     tree_guide, tree_toggle,
+    group,
 }
 
 #[derive(Clone, Debug)]
@@ -173,7 +324,13 @@ impl Theme {
     /// Parse a theme from TOML text. `base` supplies values for any key the
     /// text does not define (pass `None` only for the root `ansi` theme).
     pub fn parse(id: &str, text: &str, base: Option<&Theme>) -> Result<Theme> {
-        let file: ThemeFile = toml::from_str(text).context("parsing theme")?;
+        let doc: ThemeDoc = toml::from_str(text).context("parsing theme")?;
+        Ok(Theme::from_doc(id, &doc, base))
+    }
+
+    /// Resolve an editable document into a theme. Never fails: problems
+    /// become warnings and the affected keys keep their base values.
+    pub fn from_doc(id: &str, file: &ThemeDoc, base: Option<&Theme>) -> Theme {
         let mut warnings = Vec::new();
 
         let mut styles = base.map(|b| b.styles.clone()).unwrap_or_default();
@@ -218,17 +375,49 @@ impl Theme {
         }
 
         let mut icons = base.map(|b| b.icons.clone()).unwrap_or_default();
-        merge_icons(&mut icons, file.icons);
+        merge_icons(&mut icons, file.icons.clone());
 
-        Ok(Theme {
+        Theme {
             id: id.to_string(),
-            name: file.name.unwrap_or_else(|| id.to_string()),
+            name: file.name.clone().unwrap_or_else(|| id.to_string()),
             dark: file.dark.or(base.and_then(|b| b.dark)),
             styles,
             bar,
             icons,
             warnings,
-        })
+        }
+    }
+
+    /// Load the editable document for a theme name, path, or built-in id.
+    pub fn load_doc(name: &str) -> Result<(String, ThemeDoc)> {
+        let as_path = Path::new(name);
+        if name.ends_with(".toml") || name.contains(std::path::MAIN_SEPARATOR) {
+            let text = std::fs::read_to_string(as_path)
+                .with_context(|| format!("reading theme {}", as_path.display()))?;
+            let id = as_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| name.to_string());
+            return Ok((id, toml::from_str(&text).context("parsing theme")?));
+        }
+        if let Some(dir) = crate::config::themes_dir() {
+            let candidate = dir.join(format!("{name}.toml"));
+            if candidate.is_file() {
+                let text = std::fs::read_to_string(&candidate)
+                    .with_context(|| format!("reading theme {}", candidate.display()))?;
+                return Ok((
+                    name.to_string(),
+                    toml::from_str(&text).context("parsing theme")?,
+                ));
+            }
+        }
+        if let Some((_, text)) = BUILTIN.iter().find(|(id, _)| *id == name) {
+            return Ok((
+                name.to_string(),
+                toml::from_str(text).context("parsing theme")?,
+            ));
+        }
+        Err(anyhow!("unknown theme `{name}` (try --list-themes)"))
     }
 
     /// The `ansi` theme: no truecolor, inherits the terminal palette.
@@ -310,7 +499,7 @@ pub fn available_themes() -> Vec<ThemeInfo> {
                 .unwrap_or_default();
             let name = std::fs::read_to_string(&p)
                 .ok()
-                .and_then(|t| toml::from_str::<ThemeFile>(&t).ok())
+                .and_then(|t| toml::from_str::<ThemeDoc>(&t).ok())
                 .and_then(|f| f.name)
                 .unwrap_or_else(|| id.clone());
             list.push(ThemeInfo {
@@ -324,7 +513,7 @@ pub fn available_themes() -> Vec<ThemeInfo> {
         if list.iter().any(|t| t.id == *id) {
             continue;
         }
-        let name = toml::from_str::<ThemeFile>(text)
+        let name = toml::from_str::<ThemeDoc>(text)
             .ok()
             .and_then(|f| f.name)
             .unwrap_or_else(|| id.to_string());
@@ -335,6 +524,39 @@ pub fn available_themes() -> Vec<ThemeInfo> {
         });
     }
     list
+}
+
+/// Write a theme document to the user themes directory. Returns the path.
+pub fn save_user_theme(id: &str, doc: &ThemeDoc) -> Result<PathBuf> {
+    let dir = crate::config::themes_dir().context("no config directory on this platform")?;
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let path = dir.join(format!("{id}.toml"));
+    let text = format!("# cdu theme (edited in cdu)\n{}", doc.to_toml());
+    std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
+}
+
+/// Turn a display name into a file-safe theme id.
+pub fn slugify(name: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for c in name.trim().chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            dash = false;
+        } else if !dash && !out.is_empty() {
+            out.push('-');
+            dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "custom".to_string()
+    } else {
+        out
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -513,7 +735,7 @@ mod tests {
 
     #[test]
     fn base_theme_defines_every_style_key() {
-        let file: ThemeFile = toml::from_str(BUILTIN[0].1).unwrap();
+        let file: ThemeDoc = toml::from_str(BUILTIN[0].1).unwrap();
         for key in Styles::KEYS {
             assert!(file.styles.contains_key(*key), "ansi theme missing `{key}`");
         }
@@ -561,6 +783,44 @@ mod tests {
         assert_eq!(gradient(&bar, 1.0), Color::Rgb(200, 200, 200));
         let ansi = BarTheme::default();
         assert_eq!(gradient(&ansi, 0.9), Color::Red);
+    }
+
+    #[test]
+    fn doc_round_trips_through_to_toml() {
+        for (id, text) in BUILTIN {
+            let doc: ThemeDoc = toml::from_str(text).unwrap();
+            let again: ThemeDoc = toml::from_str(&doc.to_toml())
+                .unwrap_or_else(|e| panic!("{id}: {e}\n{}", doc.to_toml()));
+            assert_eq!(doc.styles, again.styles, "{id}");
+            assert_eq!(doc.palette, again.palette, "{id}");
+            assert_eq!(doc.name, again.name);
+            let base = Theme::base();
+            let a = Theme::from_doc(id, &doc, Some(&base));
+            let b = Theme::from_doc(id, &again, Some(&base));
+            for k in Styles::KEYS {
+                assert_eq!(a.styles.get(k), b.styles.get(k), "{id} {k}");
+            }
+        }
+    }
+
+    #[test]
+    fn inline_style_and_keys() {
+        let d = StyleDef {
+            fg: Some("#123456".into()),
+            bold: Some(true),
+            ..StyleDef::default()
+        };
+        assert_eq!(d.to_inline(), "{ fg = \"#123456\", bold = true }");
+        assert_eq!(StyleDef::default().to_inline(), "{}");
+        assert_eq!(key("dir_open"), "dir_open");
+        assert_eq!(key("docker-compose.yml"), "\"docker-compose.yml\"");
+    }
+
+    #[test]
+    fn slugify_names() {
+        assert_eq!(slugify("My Theme!"), "my-theme");
+        assert_eq!(slugify("  Nord (light) "), "nord-light");
+        assert_eq!(slugify("???"), "custom");
     }
 
     #[test]

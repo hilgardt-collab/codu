@@ -7,6 +7,7 @@ mod format;
 mod icons;
 mod scan;
 mod theme;
+mod theme_editor;
 mod ui;
 
 use std::io::{self, Write};

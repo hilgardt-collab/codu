@@ -209,6 +209,25 @@ fn draw_list_rows(frame: &mut Frame, inner: Rect, app: &App, cols: &Cols) {
         ));
         match row {
             Row::Parent => push_parent(&mut spans, app, cols, cols.name as usize, p),
+            Row::Group(g) => {
+                let g = &app.groups[*g];
+                let icon = if g.icon.is_empty() {
+                    String::new()
+                } else {
+                    format!("{} ", g.icon)
+                };
+                let caption = format!(
+                    "─ {icon}{} · {} · {} ",
+                    g.label,
+                    format::count(g.count as u64),
+                    format::bytes_str(g.size, app.si)
+                );
+                let avail = (inner.width as usize).saturating_sub(2);
+                let caption = format::truncate_right(&caption, avail);
+                let fill = avail.saturating_sub(format::width(&caption));
+                spans.push(Span::styled(caption, p(st.group)));
+                spans.push(Span::styled("─".repeat(fill), p(st.group)));
+            }
             Row::Entry(idx) => {
                 let node = &dir.children[*idx];
                 let name_style =
@@ -473,6 +492,9 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     if app.dirs_first {
         spans.push(Span::styled(" (dirs first)", st.status));
     }
+    if app.group_by_type {
+        spans.push(Span::styled(" (by type)", st.status));
+    }
 
     spans.push(Span::styled("  ·  ", st.status));
     spans.push(Span::styled(
@@ -536,6 +558,7 @@ fn draw_keybar(frame: &mut Frame, area: Rect, app: &App) {
             ("i", "info"),
             ("d", "delete"),
             ("r", "rescan"),
+            ("o", "options"),
             ("T", "theme"),
             ("?", "help"),
             ("Esc", "quit"),
@@ -554,6 +577,7 @@ fn draw_keybar(frame: &mut Frame, area: Rect, app: &App) {
             ("i", "info"),
             ("d", "delete"),
             ("r", "rescan"),
+            ("o", "options"),
             ("T", "theme"),
             ("?", "help"),
             ("Esc", "quit"),

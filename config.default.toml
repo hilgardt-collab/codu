@@ -30,6 +30,10 @@ apparent-size = false
 # Sort directories before files (toggle with t).
 dirs-first = false
 
+# Group entries by type (directories, images, video, archives, ...) with a
+# caption row per group (toggle with y).
+group-by-type = false
+
 # Show dot-files and dot-directories (toggle with e).
 show-hidden = true
 

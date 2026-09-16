@@ -13,9 +13,10 @@ use ratatui::layout::Rect;
 
 use crate::config::{BarMode, Config, SortKey, View};
 use crate::format;
-use crate::icons::IconSet;
+use crate::icons::{self, IconMode, IconSet};
 use crate::scan::{self, Kind, Node, Progress, ScanOptions};
 use crate::theme::{self, Theme, ThemeInfo};
+use crate::theme_editor::{Attr, Field, ThemeEditor};
 
 /// One row of the list view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +25,17 @@ pub enum Row {
     Parent,
     /// Index into the current directory's `children`.
     Entry(usize),
+    /// Caption row when grouping by type; index into `App::groups`.
+    Group(usize),
+}
+
+/// A "group by type" caption.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupInfo {
+    pub label: String,
+    pub icon: String,
+    pub size: u64,
+    pub count: usize,
 }
 
 /// One row of the tree view.
@@ -66,7 +78,11 @@ pub enum Popup {
     Themes {
         cursor: usize,
         original: Box<Theme>,
+        /// Name prompt while creating a new theme copy.
+        prompt: Option<String>,
     },
+    ThemeEditor(Box<ThemeEditor>),
+    Options,
     Message {
         title: String,
         body: String,
@@ -105,6 +121,7 @@ struct ListOpts {
     needle: String,
     /// Tree view: directories are listed even when they don't match the filter.
     dirs_always: bool,
+    group_by_type: bool,
 }
 
 pub struct App {
@@ -123,9 +140,12 @@ pub struct App {
     pub cursor: usize,
     pub scroll: usize,
 
+    pub groups: Vec<GroupInfo>,
+
     pub sort: SortKey,
     pub sort_reverse: bool,
     pub dirs_first: bool,
+    pub group_by_type: bool,
     pub apparent: bool,
     pub si: bool,
     pub bar_mode: BarMode,
@@ -170,6 +190,7 @@ impl App {
             sort: config.sort,
             sort_reverse: config.sort_reverse,
             dirs_first: config.dirs_first,
+            group_by_type: config.group_by_type,
             apparent: config.apparent_size,
             si: config.si,
             bar_mode: config.bar_mode,
@@ -187,6 +208,7 @@ impl App {
             path: Vec::new(),
             rows: Vec::new(),
             tree_rows: Vec::new(),
+            groups: Vec::new(),
             cursor: 0,
             scroll: 0,
             filter: String::new(),
@@ -450,7 +472,7 @@ impl App {
             .iter()
             .filter_map(|r| match r {
                 Row::Entry(i) => Some(dir.children[*i].size_of(self.apparent)),
-                Row::Parent => None,
+                Row::Parent | Row::Group(_) => None,
             })
             .max()
             .unwrap_or(0)
@@ -465,6 +487,7 @@ impl App {
             show_hidden: self.show_hidden,
             needle: self.filter.to_lowercase(),
             dirs_always,
+            group_by_type: self.group_by_type,
         }
     }
 
@@ -494,10 +517,17 @@ impl App {
             self.cursor = 0;
             return;
         };
-        let idx = sorted_children(dir, &opts);
+        let arranged = arrange(dir, &opts, &self.icons);
         self.rows.clear();
+        self.groups.clear();
         self.rows.push(Row::Parent);
-        self.rows.extend(idx.into_iter().map(Row::Entry));
+        for (group, members) in arranged {
+            if let Some(g) = group {
+                self.groups.push(g);
+                self.rows.push(Row::Group(self.groups.len() - 1));
+            }
+            self.rows.extend(members.into_iter().map(Row::Entry));
+        }
 
         if let Some(child) = keep
             && let Some(pos) = self.rows.iter().position(|r| *r == Row::Entry(child))
@@ -523,7 +553,7 @@ impl App {
             parent: true,
         }];
         let mut path = Vec::new();
-        flatten(tree, &mut path, &[], true, &opts, &mut rows);
+        flatten(tree, &mut path, &[], true, &opts, &self.icons, &mut rows);
         self.tree_rows = rows;
 
         if let Some(keep) = keep {
@@ -554,7 +584,7 @@ impl App {
                 let dir = node_at(tree, &self.path);
                 if let Some(pos) = self.rows.iter().position(|r| match r {
                     Row::Entry(i) => &*dir.children[*i].name == name,
-                    Row::Parent => false,
+                    Row::Parent | Row::Group(_) => false,
                 }) {
                     self.cursor = pos;
                 }
@@ -571,7 +601,34 @@ impl App {
 
     /// Put the cursor on the first real entry rather than `..`.
     fn select_first_entry(&mut self) {
-        self.cursor = if self.row_count() > 1 { 1 } else { 0 };
+        self.cursor = self
+            .nearest_selectable(1.min(self.row_count().saturating_sub(1)), 1)
+            .unwrap_or(0);
+    }
+
+    /// Group captions cannot be selected.
+    pub fn is_selectable(&self, row: usize) -> bool {
+        match self.view {
+            View::List => !matches!(self.rows.get(row), Some(Row::Group(_))),
+            View::Tree => row < self.tree_rows.len(),
+        }
+    }
+
+    /// Nearest selectable row at or beyond `from` in direction `dir`,
+    /// falling back to the other direction.
+    fn nearest_selectable(&self, from: usize, dir: isize) -> Option<usize> {
+        let n = self.row_count();
+        if n == 0 {
+            return None;
+        }
+        let from = from.min(n - 1);
+        let forward = |start: usize| (start..n).find(|&i| self.is_selectable(i));
+        let backward = |start: usize| (0..=start).rev().find(|&i| self.is_selectable(i));
+        if dir >= 0 {
+            forward(from).or_else(|| backward(from))
+        } else {
+            backward(from).or_else(|| forward(from))
+        }
     }
 
     fn clamp_cursor(&mut self) {
@@ -580,6 +637,9 @@ impl App {
             self.cursor = 0;
         } else if self.cursor >= n {
             self.cursor = n - 1;
+        }
+        if !self.is_selectable(self.cursor) {
+            self.cursor = self.nearest_selectable(self.cursor, 1).unwrap_or(0);
         }
     }
 
@@ -602,10 +662,24 @@ impl App {
 
     fn move_cursor(&mut self, delta: isize) {
         let n = self.row_count();
-        if n == 0 {
+        if n == 0 || delta == 0 {
             return;
         }
-        self.cursor = (self.cursor as isize + delta).clamp(0, n as isize - 1) as usize;
+        let target = (self.cursor as isize + delta).clamp(0, n as isize - 1) as usize;
+        // Single steps must skip captions; larger jumps land on the nearest entry.
+        let dir = delta.signum();
+        let candidate = if delta.abs() == 1 && !self.is_selectable(target) {
+            let next = target as isize + dir;
+            if next < 0 || next >= n as isize {
+                return;
+            }
+            self.nearest_selectable(next as usize, dir)
+        } else {
+            self.nearest_selectable(target, dir)
+        };
+        if let Some(c) = candidate {
+            self.cursor = c;
+        }
     }
 
     fn page_size(&self) -> isize {
@@ -640,7 +714,7 @@ impl App {
                     self.set_status("directory was not scanned".into(), true);
                 }
             }
-            None => {}
+            Some(Row::Group(_)) | None => {}
         }
     }
 
@@ -999,8 +1073,13 @@ impl App {
             KeyCode::PageDown => self.move_cursor(self.page_size()),
             KeyCode::Char('u') if ctrl => self.move_cursor(-self.page_size() / 2),
             KeyCode::Char('d') if ctrl => self.move_cursor(self.page_size() / 2),
-            KeyCode::Home | KeyCode::Char('g') => self.cursor = 0,
-            KeyCode::End | KeyCode::Char('G') => self.cursor = self.row_count().saturating_sub(1),
+            KeyCode::Home | KeyCode::Char('g') => {
+                self.cursor = self.nearest_selectable(0, 1).unwrap_or(0);
+            }
+            KeyCode::End | KeyCode::Char('G') => {
+                let last = self.row_count().saturating_sub(1);
+                self.cursor = self.nearest_selectable(last, -1).unwrap_or(0);
+            }
             KeyCode::Tab | KeyCode::Char('v') => self.switch_view(),
 
             KeyCode::Enter if tree => self.tree_toggle(),
@@ -1027,6 +1106,11 @@ impl App {
                 self.dirs_first = !self.dirs_first;
                 self.rebuild();
             }
+            KeyCode::Char('y') => {
+                self.group_by_type = !self.group_by_type;
+                self.rebuild();
+            }
+            KeyCode::Char('o') => self.popup = Popup::Options,
             KeyCode::Char('a') => {
                 self.apparent = !self.apparent;
                 self.rebuild();
@@ -1056,6 +1140,7 @@ impl App {
                 self.popup = Popup::Themes {
                     cursor,
                     original: Box::new(self.theme.clone()),
+                    prompt: None,
                 };
             }
             KeyCode::Char('?') | KeyCode::F(1) => self.popup = Popup::Help { scroll: 0 },
@@ -1111,8 +1196,37 @@ impl App {
                     self.perform_delete(mode, path);
                 }
             }
-            Popup::Themes { cursor, original } => {
+            Popup::Themes {
+                cursor,
+                original,
+                prompt,
+            } => {
                 let n = self.themes.len();
+                if let Some(text) = prompt {
+                    match key.code {
+                        KeyCode::Esc => *prompt = None,
+                        KeyCode::Backspace => {
+                            text.pop();
+                        }
+                        KeyCode::Enter => {
+                            let name = text.trim().to_string();
+                            if name.is_empty() {
+                                return;
+                            }
+                            let source = self.themes.get(*cursor).map(|t| t.id.clone());
+                            let original = std::mem::replace(original, Box::new(Theme::base()));
+                            self.popup = Popup::None;
+                            if let Some(source) = source {
+                                self.create_theme_copy(&source, &name, *original);
+                            }
+                        }
+                        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            text.push(c);
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
                 match key.code {
                     KeyCode::Down | KeyCode::Char('j') if n > 0 => {
                         let c = (*cursor + 1) % n;
@@ -1128,11 +1242,37 @@ impl App {
                         let id = self.theme.id.clone();
                         self.popup = Popup::None;
                         self.set_status(
-                            format!(
-                                "theme: {id}  (add theme = \"{id}\" to config.toml to keep it)"
-                            ),
+                            format!("theme: {id}  (S in the picker sets it as default)"),
                             false,
                         );
+                    }
+                    KeyCode::Char('S') => {
+                        let id = self.theme.id.clone();
+                        match crate::config::set_default_theme(&id) {
+                            Ok(path) => self.set_status(
+                                format!("default theme {id} saved to {}", path.display()),
+                                false,
+                            ),
+                            Err(e) => {
+                                self.set_status(format!("could not save config: {e:#}"), true)
+                            }
+                        }
+                    }
+                    KeyCode::Char('e') => {
+                        let id = self.themes.get(*cursor).map(|t| t.id.clone());
+                        let original = std::mem::replace(original, Box::new(Theme::base()));
+                        self.popup = Popup::None;
+                        if let Some(id) = id {
+                            self.open_theme_editor(&id, *original);
+                        }
+                    }
+                    KeyCode::Char('n') => {
+                        let base = self
+                            .themes
+                            .get(*cursor)
+                            .map(|t| t.name.clone())
+                            .unwrap_or_default();
+                        *prompt = Some(format!("{base} copy"));
                     }
                     KeyCode::Esc | KeyCode::Char('T') => {
                         let original = std::mem::replace(original, Box::new(Theme::base()));
@@ -1142,12 +1282,158 @@ impl App {
                     _ => {}
                 }
             }
+            Popup::ThemeEditor(_) => self.on_editor_key(key),
+            Popup::Options => match key.code {
+                KeyCode::Char('t') => {
+                    self.dirs_first = !self.dirs_first;
+                    self.rebuild();
+                }
+                KeyCode::Char('y') => {
+                    self.group_by_type = !self.group_by_type;
+                    self.rebuild();
+                }
+                KeyCode::Char('e') => {
+                    self.show_hidden = !self.show_hidden;
+                    self.rebuild();
+                }
+                KeyCode::Char('a') => {
+                    self.apparent = !self.apparent;
+                    self.rebuild();
+                }
+                KeyCode::Char('b') => self.bar_mode = self.bar_mode.next(),
+                KeyCode::Char('c') => self.show_count = !self.show_count,
+                KeyCode::Char('m') => self.show_mtime = !self.show_mtime,
+                KeyCode::Char('i') => {
+                    self.config.icons = match self.config.icons {
+                        IconMode::Emoji => IconMode::Ascii,
+                        IconMode::Ascii => IconMode::None,
+                        IconMode::None => IconMode::Emoji,
+                    };
+                    self.icons = IconSet::build(self.config.icons, &self.theme.icons);
+                    self.rebuild();
+                }
+                KeyCode::Char('B') => self.config.borders = !self.config.borders,
+                KeyCode::Char('v') | KeyCode::Tab => self.switch_view(),
+                KeyCode::Esc | KeyCode::Char('o') | KeyCode::Enter => self.popup = Popup::None,
+                _ => {}
+            },
             Popup::Message { .. } => {
                 self.popup = Popup::None;
                 if self.should_quit_on_dismiss {
                     self.should_quit = true;
                 }
             }
+        }
+    }
+
+    /// Open the theme editor on `id`, applying it live. `original` is
+    /// restored if the user discards their changes.
+    fn open_theme_editor(&mut self, id: &str, original: Theme) {
+        match Theme::load_doc(id) {
+            Ok((id, doc)) => {
+                let editor = ThemeEditor::new(id, doc, original);
+                self.apply_theme(editor.resolved());
+                self.popup = Popup::ThemeEditor(Box::new(editor));
+            }
+            Err(e) => self.set_status(format!("theme {id}: {e:#}"), true),
+        }
+    }
+
+    /// Save a copy of `source` under a new name and open it in the editor.
+    fn create_theme_copy(&mut self, source: &str, name: &str, original: Theme) {
+        let (_, mut doc) = match Theme::load_doc(source) {
+            Ok(d) => d,
+            Err(e) => {
+                self.set_status(format!("theme {source}: {e:#}"), true);
+                return;
+            }
+        };
+        doc.name = Some(name.to_string());
+        let id = theme::slugify(name);
+        match theme::save_user_theme(&id, &doc) {
+            Ok(path) => {
+                self.themes = theme::available_themes();
+                self.set_status(format!("created {}", path.display()), false);
+                self.open_theme_editor(&id, original);
+            }
+            Err(e) => self.set_status(format!("could not save theme: {e:#}"), true),
+        }
+    }
+
+    fn on_editor_key(&mut self, key: KeyEvent) {
+        let Popup::ThemeEditor(mut ed) = std::mem::replace(&mut self.popup, Popup::None) else {
+            return;
+        };
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let mut close = false;
+        let mut revert = false;
+
+        if let Some(prompt) = ed.prompt.as_mut() {
+            match key.code {
+                KeyCode::Esc => ed.cancel_prompt(),
+                KeyCode::Enter => {
+                    ed.commit_prompt();
+                }
+                KeyCode::Backspace => {
+                    prompt.text.pop();
+                }
+                KeyCode::Char(c) if !ctrl => prompt.text.push(c),
+                _ => {}
+            }
+        } else {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => ed.move_cursor(-1),
+                KeyCode::Down | KeyCode::Char('j') => ed.move_cursor(1),
+                KeyCode::PageUp => ed.move_cursor(-10),
+                KeyCode::PageDown => ed.move_cursor(10),
+                KeyCode::Home => ed.move_cursor(-(ed.rows.len() as isize)),
+                KeyCode::End => ed.move_cursor(ed.rows.len() as isize),
+                KeyCode::Enter => ed.activate(),
+                KeyCode::Char('f') => ed.open_prompt(Field::Fg),
+                KeyCode::Char('g') => ed.open_prompt(Field::Bg),
+                KeyCode::Char('b') => ed.toggle_attr(Attr::Bold),
+                KeyCode::Char('i') => ed.toggle_attr(Attr::Italic),
+                KeyCode::Char('u') => ed.toggle_attr(Attr::Underline),
+                KeyCode::Char('d') => ed.toggle_attr(Attr::Dim),
+                KeyCode::Char('r') => ed.toggle_attr(Attr::Reversed),
+                KeyCode::Char('x') => ed.toggle_attr(Attr::CrossedOut),
+                KeyCode::Delete | KeyCode::Backspace => ed.clear_row(),
+                KeyCode::Char('s') => match theme::save_user_theme(&ed.id, &ed.doc) {
+                    Ok(path) => {
+                        ed.dirty = false;
+                        ed.confirm_discard = false;
+                        ed.message = Some((format!("saved {}", path.display()), false));
+                        self.themes = theme::available_themes();
+                    }
+                    Err(e) => ed.message = Some((format!("{e:#}"), true)),
+                },
+                KeyCode::Esc => {
+                    if ed.dirty && !ed.confirm_discard {
+                        ed.confirm_discard = true;
+                        ed.message = Some((
+                            "unsaved changes: s saves, Esc again discards them".into(),
+                            true,
+                        ));
+                    } else {
+                        close = true;
+                        revert = ed.dirty;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if close {
+            if revert {
+                let original = ed.original.clone();
+                self.apply_theme(original);
+            }
+            self.popup = Popup::None;
+        } else {
+            if ed.prompt.is_none() {
+                self.apply_theme(ed.resolved());
+            }
+            self.popup = Popup::ThemeEditor(ed);
         }
     }
 
@@ -1168,7 +1454,7 @@ impl App {
                     return;
                 }
                 let row = self.scroll + (ev.row - a.y) as usize;
-                if row >= self.row_count() {
+                if row >= self.row_count() || !self.is_selectable(row) {
                     return;
                 }
                 let now = Instant::now();
@@ -1228,6 +1514,60 @@ fn sorted_children(dir: &Node, o: &ListOpts) -> Vec<usize> {
     idx
 }
 
+/// Children of `dir` in display order, optionally bucketed by type.
+/// Without grouping there is a single unlabelled bucket.
+fn arrange(dir: &Node, o: &ListOpts, icons: &IconSet) -> Vec<(Option<GroupInfo>, Vec<usize>)> {
+    let idx = sorted_children(dir, o);
+    if !o.group_by_type {
+        return vec![(None, idx)];
+    }
+    let mut buckets: Vec<(String, Vec<usize>)> = Vec::new();
+    for i in idx {
+        let label = icons::category(&dir.children[i]);
+        match buckets.iter_mut().find(|(l, _)| *l == label) {
+            Some((_, members)) => members.push(i),
+            None => buckets.push((label, vec![i])),
+        }
+    }
+    let mut groups: Vec<(GroupInfo, Vec<usize>)> = buckets
+        .into_iter()
+        .map(|(label, members)| {
+            let size = members
+                .iter()
+                .map(|&i| dir.children[i].size_of(o.apparent))
+                .sum();
+            let icon = icons.for_category(&label).to_string();
+            (
+                GroupInfo {
+                    label,
+                    icon,
+                    size,
+                    count: members.len(),
+                },
+                members,
+            )
+        })
+        .collect();
+    match o.sort {
+        SortKey::Name => groups.sort_by(|a, b| a.0.label.cmp(&b.0.label)),
+        _ => groups.sort_by(|a, b| {
+            b.0.size
+                .cmp(&a.0.size)
+                .then_with(|| a.0.label.cmp(&b.0.label))
+        }),
+    }
+    if o.reverse {
+        groups.reverse();
+    }
+    if o.dirs_first
+        && let Some(pos) = groups.iter().position(|(g, _)| g.label == "directories")
+    {
+        let dirs = groups.remove(pos);
+        groups.insert(0, dirs);
+    }
+    groups.into_iter().map(|(g, m)| (Some(g), m)).collect()
+}
+
 /// Depth-first flattening of the expanded tree into rows.
 fn flatten(
     node: &Node,
@@ -1235,6 +1575,7 @@ fn flatten(
     guides: &[bool],
     is_last: bool,
     o: &ListOpts,
+    icons: &IconSet,
     out: &mut Vec<TreeRow>,
 ) {
     out.push(TreeRow {
@@ -1246,7 +1587,10 @@ fn flatten(
     if !(node.is_dir() && node.expanded) {
         return;
     }
-    let kids = sorted_children(node, o);
+    let kids: Vec<usize> = arrange(node, o, icons)
+        .into_iter()
+        .flat_map(|(_, m)| m)
+        .collect();
     let n = kids.len();
     let child_guides: Vec<bool> = if path.is_empty() {
         Vec::new()
@@ -1257,7 +1601,15 @@ fn flatten(
     };
     for (k, &i) in kids.iter().enumerate() {
         path.push(i);
-        flatten(&node.children[i], path, &child_guides, k + 1 == n, o, out);
+        flatten(
+            &node.children[i],
+            path,
+            &child_guides,
+            k + 1 == n,
+            o,
+            icons,
+            out,
+        );
         path.pop();
     }
 }
@@ -1342,6 +1694,7 @@ mod tests {
             sort: cfg.sort,
             sort_reverse: false,
             dirs_first: false,
+            group_by_type: false,
             apparent: false,
             si: false,
             bar_mode: cfg.bar_mode,
@@ -1359,6 +1712,7 @@ mod tests {
             path: vec![],
             rows: vec![],
             tree_rows: vec![],
+            groups: vec![],
             cursor: 0,
             scroll: 0,
             filter: String::new(),
@@ -1401,6 +1755,7 @@ mod tests {
             .map(|r| match r {
                 Row::Parent => "..".to_string(),
                 Row::Entry(i) => d.children[*i].name.to_string(),
+                Row::Group(g) => format!("[{}]", app.groups[*g].label),
             })
             .collect()
     }
@@ -1544,6 +1899,110 @@ mod tests {
         let mut p = vec![0];
         fix_path_after_delete(&mut p, &[0, 2]);
         assert_eq!(p, vec![0]); // deletion below the current dir: unchanged
+    }
+
+    fn typed_sample() -> Node {
+        dir(
+            "/root",
+            vec![
+                leaf("a.png", 100),
+                leaf("b.mp4", 900),
+                dir("docs", vec![leaf("x.md", 5)]),
+                leaf("c.jpg", 50),
+                leaf("notes.txt", 10),
+            ],
+        )
+    }
+
+    #[test]
+    fn group_by_type_adds_captions_and_orders_groups_by_size() {
+        let mut app = app_with(typed_sample());
+        app.group_by_type = true;
+        app.rebuild_rows(None);
+        assert_eq!(
+            names(&app),
+            [
+                "..",
+                "[video]",
+                "b.mp4",
+                "[images]",
+                "a.png",
+                "c.jpg",
+                "[text]",
+                "notes.txt",
+                "[directories]",
+                "docs"
+            ]
+        );
+        assert_eq!(app.groups[1].size, 150);
+        assert_eq!(app.groups[1].count, 2);
+        app.dirs_first = true;
+        app.rebuild_rows(None);
+        assert_eq!(names(&app)[1], "[directories]");
+        app.dirs_first = false;
+        app.set_sort(SortKey::Name);
+        assert_eq!(names(&app)[1], "[directories]");
+        assert_eq!(names(&app)[3], "[images]");
+    }
+
+    #[test]
+    fn cursor_skips_group_captions() {
+        let mut app = app_with(typed_sample());
+        app.group_by_type = true;
+        app.rebuild_rows(None);
+        app.select_first_entry();
+        assert_eq!(names(&app)[app.cursor], "b.mp4");
+        app.move_cursor(1);
+        assert_eq!(names(&app)[app.cursor], "a.png");
+        app.move_cursor(-1);
+        assert_eq!(names(&app)[app.cursor], "b.mp4");
+        app.move_cursor(-1);
+        assert_eq!(names(&app)[app.cursor], "..");
+        app.on_key(key(KeyCode::End));
+        assert_eq!(names(&app)[app.cursor], "docs");
+        app.on_key(key(KeyCode::Home));
+        assert_eq!(names(&app)[app.cursor], "..");
+        app.cursor = 3; // "[images]"
+        app.clamp_cursor();
+        assert_eq!(names(&app)[app.cursor], "a.png");
+        app.on_key(key(KeyCode::PageUp));
+        assert!(app.is_selectable(app.cursor));
+    }
+
+    #[test]
+    fn y_and_o_keys() {
+        let mut app = app_with(typed_sample());
+        app.on_key(key(KeyCode::Char('y')));
+        assert!(app.group_by_type);
+        assert!(names(&app).iter().any(|n| n.starts_with('[')));
+        app.on_key(key(KeyCode::Char('o')));
+        assert!(matches!(app.popup, Popup::Options));
+        app.on_key(key(KeyCode::Char('t')));
+        assert!(app.dirs_first);
+        app.on_key(key(KeyCode::Char('y')));
+        assert!(!app.group_by_type);
+        app.on_key(key(KeyCode::Esc));
+        assert!(matches!(app.popup, Popup::None));
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn tree_view_groups_without_captions() {
+        let mut app = app_with(typed_sample());
+        app.group_by_type = true;
+        app.switch_view();
+        assert_eq!(
+            tree_names(&app),
+            [
+                "..",
+                "/root",
+                " b.mp4",
+                " a.png",
+                " c.jpg",
+                " notes.txt",
+                " docs"
+            ]
+        );
     }
 
     #[test]

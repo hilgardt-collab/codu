@@ -64,6 +64,7 @@ scan_path     = { fg = "base1" }
 filter        = { fg = "orange", bold = true }
 tree_guide    = { fg = "base1" }
 tree_toggle   = { fg = "orange", bold = true }
+group         = { fg = "base1", italic = true }
 
 [bar]
 gradient = true

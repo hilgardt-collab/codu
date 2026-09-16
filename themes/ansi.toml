@@ -48,6 +48,7 @@ scan_path     = { fg = "darkgray" }
 filter        = { fg = "yellow", bold = true }
 tree_guide    = { fg = "darkgray" }
 tree_toggle   = { fg = "yellow", bold = true }
+group         = { fg = "darkgray", italic = true }
 
 [bar]
 filled   = "█"

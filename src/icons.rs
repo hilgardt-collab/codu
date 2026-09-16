@@ -36,25 +36,30 @@ pub struct IconSet {
 
 /// Default emoji set. Only code points with East Asian Width = Wide are used,
 /// because those are the ones every terminal agrees occupy two cells.
-const EMOJI_EXT: &[(&[&str], &str)] = &[
+/// Extension groups: (extensions, emoji, type label). The label is what
+/// "group by type" sorts and captions with.
+const EMOJI_EXT: &[(&[&str], &str, &str)] = &[
     (
         &[
             "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico", "tif", "tiff", "heic",
             "avif", "raw", "psd", "xcf",
         ],
         "📷",
+        "images",
     ),
     (
         &[
             "mp3", "flac", "wav", "ogg", "oga", "m4a", "aac", "opus", "wma", "aiff", "mid",
         ],
         "🎵",
+        "audio",
     ),
     (
         &[
             "mp4", "mkv", "mov", "avi", "webm", "m4v", "wmv", "flv", "mpg", "mpeg", "ts",
         ],
         "🎬",
+        "video",
     ),
     (
         &[
@@ -62,15 +67,25 @@ const EMOJI_EXT: &[(&[&str], &str)] = &[
             "deb", "rpm", "apk", "jar", "whl", "crate",
         ],
         "📦",
+        "archives",
     ),
-    (&["iso", "img", "qcow2", "vdi", "vmdk", "dmg"], "💿"),
-    (&["rs"], "🦀"),
-    (&["py", "pyc", "pyi", "ipynb"], "🐍"),
-    (&["go"], "🐹"),
-    (&["java", "class", "kt", "kts", "scala", "groovy"], "☕"),
+    (
+        &["iso", "img", "qcow2", "vdi", "vmdk", "dmg"],
+        "💿",
+        "disk images",
+    ),
+    (&["rs"], "🦀", "rust"),
+    (&["py", "pyc", "pyi", "ipynb"], "🐍", "python"),
+    (&["go"], "🐹", "go"),
+    (
+        &["java", "class", "kt", "kts", "scala", "groovy"],
+        "☕",
+        "jvm",
+    ),
     (
         &["c", "h", "cpp", "cc", "cxx", "hpp", "hh", "m", "mm"],
         "🔩",
+        "c/c++",
     ),
     (
         &[
@@ -78,6 +93,7 @@ const EMOJI_EXT: &[(&[&str], &str)] = &[
             "php", "ps1", "bat", "cmd",
         ],
         "📜",
+        "scripts",
     ),
     (
         &[
@@ -95,41 +111,51 @@ const EMOJI_EXT: &[(&[&str], &str)] = &[
             "plist",
         ],
         "🔧",
+        "config",
     ),
     (
         &["md", "markdown", "txt", "rst", "org", "adoc", "tex", "rtf"],
         "📝",
+        "text",
     ),
-    (&["pdf", "epub", "mobi", "djvu"], "📕"),
-    (&["doc", "docx", "odt", "pages"], "📘"),
-    (&["xls", "xlsx", "ods", "csv", "tsv", "numbers"], "📊"),
-    (&["ppt", "pptx", "odp", "key"], "📑"),
+    (&["pdf", "epub", "mobi", "djvu"], "📕", "ebooks"),
+    (&["doc", "docx", "odt", "pages"], "📘", "documents"),
+    (
+        &["xls", "xlsx", "ods", "csv", "tsv", "numbers"],
+        "📊",
+        "spreadsheets",
+    ),
+    (&["ppt", "pptx", "odp", "key"], "📑", "presentations"),
     (
         &[
             "html", "htm", "css", "scss", "sass", "less", "vue", "svelte", "astro",
         ],
         "🌐",
+        "web",
     ),
-    (&["lock"], "🔒"),
+    (&["lock"], "🔒", "lock files"),
     (
         &[
             "pem", "crt", "cer", "key", "pub", "gpg", "asc", "p12", "pfx", "keystore",
         ],
         "🔑",
+        "keys",
     ),
-    (&["log", "out", "err"], "🧾"),
-    (&["ttf", "otf", "woff", "woff2", "eot"], "🔤"),
+    (&["log", "out", "err"], "🧾", "logs"),
+    (&["ttf", "otf", "woff", "woff2", "eot"], "🔤", "fonts"),
     (
         &[
             "db", "sqlite", "sqlite3", "sql", "mdb", "accdb", "parquet", "arrow", "feather",
         ],
         "🧮",
+        "databases",
     ),
     (
         &[
             "exe", "dll", "so", "dylib", "o", "a", "lib", "bin", "elf", "msi", "appimage", "wasm",
         ],
         "🧩",
+        "binaries",
     ),
     (
         &[
@@ -144,10 +170,15 @@ const EMOJI_EXT: &[(&[&str], &str)] = &[
             "crdownload",
         ],
         "🧹",
+        "temporary",
     ),
-    (&["torrent"], "📡"),
-    (&["ipa", "xapk", "aab"], "🎮"),
-    (&["blend", "obj", "fbx", "stl", "3ds", "gltf", "glb"], "🎨"),
+    (&["torrent"], "📡", "torrents"),
+    (&["ipa", "xapk", "aab"], "🎮", "apps"),
+    (
+        &["blend", "obj", "fbx", "stl", "3ds", "gltf", "glb"],
+        "🎨",
+        "3d models",
+    ),
 ];
 
 const EMOJI_NAMES: &[(&str, &str)] = &[
@@ -233,7 +264,7 @@ impl IconSet {
 
     fn emoji_set() -> IconSet {
         let mut ext = HashMap::new();
-        for (exts, icon) in EMOJI_EXT {
+        for (exts, icon, _) in EMOJI_EXT {
             for e in *exts {
                 ext.insert((*e).to_string(), (*icon).to_string());
             }
@@ -359,6 +390,30 @@ impl IconSet {
         self.mode == IconMode::Emoji
     }
 
+    /// Icon for a "group by type" caption, from the category label.
+    pub fn for_category(&self, label: &str) -> &str {
+        if self.mode == IconMode::None {
+            return "";
+        }
+        match label {
+            "directories" => return &self.dir,
+            "symlinks" => return &self.symlink,
+            "special files" => return &self.special,
+            "files" => return &self.file,
+            _ => {}
+        }
+        if self.mode == IconMode::Emoji
+            && let Some((exts, _, _)) = EMOJI_EXT.iter().find(|(_, _, l)| *l == label)
+            && let Some(icon) = exts.first().and_then(|e| self.ext.get(*e))
+        {
+            return icon;
+        }
+        self.ext
+            .get(label)
+            .map(|s| s.as_str())
+            .unwrap_or(&self.file)
+    }
+
     /// Icon for a node in the tree view: expanded directories with the plain
     /// folder icon get the open-folder icon instead.
     pub fn for_tree_node(&self, node: &Node) -> &str {
@@ -408,6 +463,36 @@ impl IconSet {
                 }
             }
         }
+    }
+}
+
+/// Type label used by "group by type": directories, symlinks and special
+/// files form their own groups; files are grouped by extension category,
+/// falling back to the bare extension, then to "files".
+pub fn category(node: &Node) -> String {
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        let mut m = HashMap::new();
+        for (exts, _, label) in EMOJI_EXT {
+            for e in *exts {
+                m.insert(*e, *label);
+            }
+        }
+        m
+    });
+    match node.kind {
+        Kind::Dir => "directories".to_string(),
+        Kind::Symlink => "symlinks".to_string(),
+        Kind::Other => "special files".to_string(),
+        Kind::File => match extension(&node.name) {
+            Some(ext) => table
+                .get(ext.as_str())
+                .map(|l| l.to_string())
+                .unwrap_or(ext),
+            None => "files".to_string(),
+        },
     }
 }
 
@@ -474,7 +559,7 @@ mod tests {
         ] {
             assert_eq!(width(s), 2, "{s:?}");
         }
-        for (exts, icon) in EMOJI_EXT {
+        for (exts, icon, _) in EMOJI_EXT {
             assert_eq!(width(icon), 2, "ext icon {icon:?} for {exts:?}");
         }
         for (name, icon) in EMOJI_NAMES {
@@ -522,6 +607,28 @@ mod tests {
         let set = IconSet::build(IconMode::Emoji, &o);
         assert_eq!(set.dir, "D ");
         assert_eq!(set.for_node(&node("x.foo", Kind::File, 0)), "🔥");
+    }
+
+    #[test]
+    fn category_icons() {
+        let set = IconSet::build(IconMode::Emoji, &IconsDef::default());
+        assert_eq!(set.for_category("directories"), "📁");
+        assert_eq!(set.for_category("config"), "🔧");
+        assert_eq!(set.for_category("lock files"), "🔒");
+        assert_eq!(set.for_category("xyz"), "📄");
+        assert_eq!(set.for_category("rs"), "🦀");
+        let none = IconSet::build(IconMode::None, &IconsDef::default());
+        assert_eq!(none.for_category("images"), "");
+    }
+
+    #[test]
+    fn categories_by_kind_and_extension() {
+        assert_eq!(category(&node("x", Kind::Dir, 0)), "directories");
+        assert_eq!(category(&node("a.PNG", Kind::File, 0)), "images");
+        assert_eq!(category(&node("a.xyz", Kind::File, 0)), "xyz");
+        assert_eq!(category(&node("README", Kind::File, 0)), "files");
+        assert_eq!(category(&node(".bashrc", Kind::File, 0)), "files");
+        assert_eq!(category(&node("l", Kind::Symlink, 0)), "symlinks");
     }
 
     #[test]

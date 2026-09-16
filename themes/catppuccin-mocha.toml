@@ -74,6 +74,7 @@ scan_path     = { fg = "overlay1" }
 filter        = { fg = "yellow", bold = true }
 tree_guide    = { fg = "surface2" }
 tree_toggle   = { fg = "mauve", bold = true }
+group         = { fg = "overlay1", italic = true }
 
 [bar]
 gradient = true

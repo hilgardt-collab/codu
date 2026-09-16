@@ -136,6 +136,8 @@ percent/count columns drop, so the tool stays usable in a split pane.
 | `*` (tree)               | expand everything below the selection               |
 | `s` `n` `C` `M`          | sort by size / name / count / mtime (again = reverse) |
 | `t`                      | toggle directories-first                            |
+| `y`                      | toggle group-by-type (captioned sections)           |
+| `o`                      | options popup listing every toggle with its state   |
 | `a`                      | toggle disk usage ↔ apparent size                   |
 | `b`                      | cycle bar mode: bar+percent → bar → percent → none  |
 | `c` / `m`                | toggle item-count / mtime column                    |
@@ -144,7 +146,7 @@ percent/count columns drop, so the tool stays usable in a split pane.
 | `i`                      | info popup for selected entry                       |
 | `d` / `D`                | delete permanently / move to trash (confirm first)  |
 | `r`                      | rescan (list: current directory; tree: selection)   |
-| `T`                      | theme picker                                        |
+| `T`                      | theme picker; inside: `e` edit, `n` new copy, `S` set default |
 | `?` / `F1`               | help                                                |
 | `Esc` / `Ctrl-C`         | quit; `Esc` first closes popups and clears a filter |
 | mouse                    | click select, double-click open/toggle, wheel scroll|
@@ -244,6 +246,39 @@ ANSI colour (`red`, `lightblue`, `darkgray`, …), `reset`, or a `[palette]`
 key. Unknown keys produce a warning, not a crash. Any theme key that is
 missing falls back to the `ansi` theme so partial themes work.
 
+### Group by type
+
+`y` buckets a directory's entries by a type label derived from the same
+extension table that picks icons (images, video, archives, rust, config, …),
+with directories, symlinks and special files as their own buckets and the
+bare extension as a fallback label. Buckets are ordered by total size
+(alphabetically under name sort), `t` pins the directory bucket first, and
+each bucket gets a caption row (`─ 🎬 video · 3 · 1.4 GiB ───`). Captions are
+not selectable: cursor movement, Home/End, paging and mouse clicks skip
+them. The tree view applies the same ordering without captions.
+
+### Options popup
+
+`o` opens a popup listing every view toggle (directories first, group by
+type, hidden, apparent size, count/mtime columns, bar mode, icon mode, view,
+borders) with its current state; the same keys work inside it and the
+listing updates behind the popup.
+
+### Theme editor
+
+The theme picker gains `e` (edit), `n` (new copy) and `S` (set default).
+Editing works on the raw theme document (`ThemeDoc`, the same shape as the
+TOML file, palette references included) rather than the resolved styles,
+so saved files stay readable and keep their palette names. After every
+change the document is re-resolved and applied, so the browser behind the
+editor previews live. Rows cover name, dark badge, all 44 style keys and the
+six bar settings. Text prompts start empty with the current value as a hint;
+`none` clears a field, and a key whose fields are all cleared is removed so
+it inherits from the `ansi` base again. Saving writes
+`$XDG_CONFIG_HOME/cdu/themes/<id>.toml`; `S` in the picker rewrites the
+`theme =` line of `config.toml` (creating the file from the commented
+default when missing).
+
 ## 4. Architecture
 
 ```
@@ -251,8 +286,10 @@ src/
   main.rs      – CLI (clap), config/theme loading, terminal setup, run loop
   cli.rs       – argument definitions
   config.rs    – config.toml model + defaults + dump
-  theme/       – Theme model, colour/style parsing, palette resolution,
-                 built-in theme registry (embedded TOML files in themes/)
+  theme.rs     – Theme model, colour/style parsing, palette resolution,
+                 built-in theme registry (embedded TOML files in themes/),
+                 ThemeDoc (editable form) with TOML writer and user-theme save
+  theme_editor.rs – editor state machine over a ThemeDoc
   icons.rs     – icon resolution + width normalisation
   scan.rs      – parallel scanner (rayon), Node tree, hard-link dedupe,
                  progress counters, exclude globs, one-file-system
