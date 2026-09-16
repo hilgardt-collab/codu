@@ -131,6 +131,7 @@ define_styles! {
     danger, warning, success,
     spinner, scan_label, scan_value, scan_path,
     filter,
+    tree_guide, tree_toggle,
 }
 
 #[derive(Clone, Debug)]

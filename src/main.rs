@@ -138,6 +138,9 @@ fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
             IconArg::None => IconMode::None,
         };
     }
+    if cli.tree {
+        config.view = config::View::Tree;
+    }
     if cli.one_file_system {
         config.one_file_system = true;
     }

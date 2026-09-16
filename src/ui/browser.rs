@@ -1,14 +1,13 @@
-//! The main browser screen: header, file list, status bar and key bar.
+//! The main browser screen: header, list or tree rows, status bar and key bar.
 
 use ratatui::Frame;
-use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType};
+use ratatui::widgets::{Block, BorderType, Widget};
 
-use crate::app::{App, Row};
-use crate::config::SortKey;
+use crate::app::{App, Row, TreeRow, node_at};
+use crate::config::View;
 use crate::format;
 use crate::scan::{Kind, Node, flags};
 use crate::theme;
@@ -23,7 +22,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     .areas(frame.area());
 
     draw_header(frame, header, app);
-    draw_list(frame, body, app);
+    draw_rows(frame, body, app);
     draw_status(frame, status, app);
     draw_keybar(frame, keybar, app);
 }
@@ -51,7 +50,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let right_w = format::width(&theme_label) as u16;
     let title_w = format::width(&title) as u16;
     let avail = area.width.saturating_sub(right_w + title_w + 2) as usize;
-    let path = app.current_path().display().to_string();
+    let path = app.header_path().display().to_string();
     let path = format!(" {} ", format::truncate_left(&path, avail));
 
     frame.render_widget(
@@ -70,7 +69,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 // ----------------------------------------------------------------------
-// List
+// Columns
 
 /// Column widths (each includes its trailing gap, except `name`).
 #[derive(Clone, Copy, Debug, Default)]
@@ -133,13 +132,16 @@ fn layout_columns(width: u16, app: &App, mtime_w: u16) -> Cols {
     c
 }
 
-fn draw_list(frame: &mut Frame, area: Rect, app: &mut App) {
+// ----------------------------------------------------------------------
+// Rows
+
+fn draw_rows(frame: &mut Frame, area: Rect, app: &mut App) {
     let st = app.theme.styles.clone();
     let inner = if app.config.borders {
-        let position = if app.rows.is_empty() {
+        let position = if app.row_count() == 0 {
             String::new()
         } else {
-            format!(" {}/{} ", app.cursor + 1, app.rows.len())
+            format!(" {}/{} ", app.cursor + 1, app.row_count())
         };
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -159,11 +161,20 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let mtime_sample = format::mtime(0, &app.config.date_format);
     let cols = layout_columns(inner.width, app, format::width(&mtime_sample) as u16);
+
+    match app.view {
+        View::List => draw_list_rows(frame, inner, app, &cols),
+        View::Tree => draw_tree_rows(frame, inner, app, &cols),
+    }
+}
+
+fn draw_list_rows(frame: &mut Frame, inner: Rect, app: &App, cols: &Cols) {
+    let st = &app.theme.styles;
     let max_size = app.max_listed_size();
     let Some(dir) = app.current() else { return };
     let dir_size = dir.size_of(app.apparent);
 
-    if app.rows.is_empty() {
+    if app.rows.len() <= 1 {
         let msg = if !app.filter.is_empty() {
             "no entries match the filter"
         } else if dir.has(flags::ERR) {
@@ -175,7 +186,9 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App) {
             Line::from(Span::styled(msg, st.hidden)).centered(),
             Rect::new(inner.x, inner.y + inner.height / 2, inner.width, 1),
         );
-        return;
+        if inner.height < 2 {
+            return;
+        }
     }
 
     let buf = frame.buffer_mut();
@@ -183,156 +196,241 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &mut App) {
     for (i, row) in app.rows[app.scroll..end].iter().enumerate() {
         let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
         let selected = app.scroll + i == app.cursor;
-        render_row(
-            buf, rect, app, dir, *row, selected, &cols, max_size, dir_size,
-        );
+        let sel = if selected { st.selected } else { Style::new() };
+        if selected {
+            buf.set_style(rect, st.selected);
+        }
+        let p = |s: Style| s.patch(sel);
+
+        let mut spans: Vec<Span> = Vec::with_capacity(14);
+        spans.push(Span::styled(
+            if selected { "▸ " } else { "  " },
+            p(st.marker),
+        ));
+        match row {
+            Row::Parent => push_parent(&mut spans, app, cols, cols.name as usize, p),
+            Row::Entry(idx) => {
+                let node = &dir.children[*idx];
+                let name_style =
+                    push_entry_head(&mut spans, app, node, cols, "", cols.name as usize, p);
+                let size = node.size_of(app.apparent);
+                let fill = if max_size > 0 {
+                    size as f64 / max_size as f64
+                } else {
+                    0.0
+                };
+                let share = if dir_size > 0 {
+                    size as f64 / dir_size as f64
+                } else {
+                    0.0
+                };
+                push_metrics(&mut spans, app, node, fill, share, cols, p);
+                let _ = name_style;
+            }
+        }
+        Line::from(spans).render(rect, buf);
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_row(
-    buf: &mut Buffer,
-    rect: Rect,
-    app: &App,
-    dir: &Node,
-    row: Row,
-    selected: bool,
-    cols: &Cols,
-    max_size: u64,
-    dir_size: u64,
-) {
+fn draw_tree_rows(frame: &mut Frame, inner: Rect, app: &App, cols: &Cols) {
     let st = &app.theme.styles;
-    let sel = if selected { st.selected } else { Style::new() };
-    if selected {
-        buf.set_style(rect, st.selected);
-    }
-    let p = |s: Style| s.patch(sel);
+    let Some(tree) = &app.tree else { return };
+    let root_size = tree.size_of(app.apparent);
 
-    let mut spans: Vec<Span> = Vec::with_capacity(12);
-    spans.push(Span::styled(
-        if selected { "▸ " } else { "  " },
-        p(st.marker),
-    ));
-
-    match row {
-        Row::Parent => {
-            if cols.flag > 0 {
-                spans.push(Span::raw("  "));
-            }
-            if cols.icon > 0 {
-                spans.push(Span::styled(format!("{} ", app.icons.parent), p(st.dir)));
-            }
-            spans.push(Span::styled(
-                format::fit("..", cols.name as usize),
-                p(st.dir),
-            ));
+    let buf = frame.buffer_mut();
+    let end = (app.scroll + inner.height as usize).min(app.tree_rows.len());
+    for (i, row) in app.tree_rows[app.scroll..end].iter().enumerate() {
+        let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
+        let selected = app.scroll + i == app.cursor;
+        let sel = if selected { st.selected } else { Style::new() };
+        if selected {
+            buf.set_style(rect, st.selected);
         }
-        Row::Entry(i) => {
-            let node = &dir.children[i];
-            let hidden = node.name.starts_with('.');
-            let name_style = if node.has(flags::EXCLUDED) {
-                st.excluded
-            } else if node.has(flags::ERR) {
-                st.error
-            } else if hidden {
-                st.hidden
-            } else {
-                match node.kind {
-                    Kind::Dir => st.dir,
-                    Kind::File => st.file,
-                    Kind::Symlink => st.symlink,
-                    Kind::Other => st.special,
+        let p = |s: Style| s.patch(sel);
+
+        let mut spans: Vec<Span> = Vec::with_capacity(16);
+        spans.push(Span::styled(
+            if selected { "▸ " } else { "  " },
+            p(st.marker),
+        ));
+        if row.parent {
+            push_parent(&mut spans, app, cols, cols.name as usize, p);
+        } else {
+            let node = node_at(tree, &row.path);
+            let prefix = tree_prefix(row, node, cols.name as usize);
+            let name_w = (cols.name as usize).saturating_sub(format::width(&prefix));
+            push_entry_head(&mut spans, app, node, cols, &prefix, name_w, p);
+            if row.path.is_empty() {
+                // The root row shows the full scanned path instead of its name.
+                if let Some(last) = spans.last_mut() {
+                    let label = app.root_path.display().to_string();
+                    last.content = format::fit(&label, name_w).into();
                 }
-            };
-
-            if cols.flag > 0 {
-                let flag = node
-                    .flag_char()
-                    .map(|c| format!("{c} "))
-                    .unwrap_or_else(|| "  ".into());
-                let flag_style = if node.has(flags::ERR) {
-                    st.error
-                } else {
-                    st.flag
-                };
-                spans.push(Span::styled(flag, p(flag_style)));
             }
-            if cols.icon > 0 {
-                spans.push(Span::styled(
-                    format!("{} ", app.icons.for_node(node)),
-                    p(name_style),
-                ));
-            }
-            spans.push(Span::styled(
-                format::fit(&node.name, cols.name as usize),
-                p(name_style),
-            ));
-
             let size = node.size_of(app.apparent);
-            let (num, unit) = format::bytes(size, app.si);
-            spans.push(Span::styled(format!(" {num:>5} "), p(st.size)));
-            spans.push(Span::styled(format!("{unit:<3}"), p(st.size_unit)));
-
-            let share = if dir_size > 0 {
-                size as f64 / dir_size as f64
+            let share = if root_size > 0 {
+                size as f64 / root_size as f64
             } else {
                 0.0
             };
-            if cols.bar > 0 {
-                let width = (cols.bar - 1) as usize;
-                let filled = if max_size > 0 {
-                    ((size as f64 / max_size as f64) * width as f64).round() as usize
-                } else {
-                    0
-                }
-                .min(width);
-                let bar = &app.theme.bar;
-                let filled_style = if bar.gradient {
-                    Style::new().fg(theme::gradient(bar, share))
-                } else {
-                    st.bar_filled
-                };
-                spans.push(Span::raw(" "));
-                spans.push(Span::styled(bar.filled.repeat(filled), p(filled_style)));
-                spans.push(Span::styled(
-                    bar.empty.repeat(width - filled),
-                    p(st.bar_empty),
-                ));
-            }
-            if cols.percent > 0 {
-                spans.push(Span::styled(
-                    format!(" {:>6}", format::percent(share)),
-                    p(st.percent),
-                ));
-            }
-            if cols.count > 0 {
-                let text = if node.is_dir() {
-                    format::count(node.items)
-                } else {
-                    String::new()
-                };
-                spans.push(Span::styled(format!(" {text:>9}"), p(st.count)));
-            }
-            if cols.mtime > 0 {
-                let text = format::mtime(node.mtime, &app.config.date_format);
-                spans.push(Span::styled(
-                    format!(" {}", format::fit(&text, (cols.mtime - 1) as usize)),
-                    p(st.mtime),
-                ));
-            }
+            push_metrics(&mut spans, app, node, share, share, cols, p);
         }
+        Line::from(spans).render(rect, buf);
     }
-
-    Line::from(spans).render_to(buf, rect);
 }
 
-trait RenderTo {
-    fn render_to(self, buf: &mut Buffer, rect: Rect);
+/// Guide lines and the +/- toggle in front of a tree row's icon.
+fn tree_prefix(row: &TreeRow, node: &Node, name_area: usize) -> String {
+    let toggle = if node.is_dir() {
+        if node.expanded { "- " } else { "+ " }
+    } else {
+        "  "
+    };
+    if row.path.is_empty() {
+        return toggle.to_string();
+    }
+    let mut guides = String::new();
+    for &last in &row.guides {
+        guides.push_str(if last { "   " } else { "│  " });
+    }
+    guides.push_str(if row.is_last { "└─" } else { "├─" });
+    let full = format!("{guides}{toggle}");
+    // Deep trees: keep the name readable by compressing the guides.
+    if format::width(&full) + 12 > name_area {
+        format!("…{} {toggle}", row.depth())
+    } else {
+        full
+    }
 }
 
-impl RenderTo for Line<'_> {
-    fn render_to(self, buf: &mut Buffer, rect: Rect) {
-        ratatui::widgets::Widget::render(self, rect, buf);
+/// The `..` row.
+fn push_parent<'a>(
+    spans: &mut Vec<Span<'a>>,
+    app: &'a App,
+    cols: &Cols,
+    name_w: usize,
+    p: impl Fn(Style) -> Style,
+) {
+    let st = &app.theme.styles;
+    if cols.flag > 0 {
+        spans.push(Span::raw("  "));
+    }
+    if cols.icon > 0 {
+        spans.push(Span::styled(format!("{} ", app.icons.parent), p(st.dir)));
+    }
+    spans.push(Span::styled(format::fit("..", name_w), p(st.dir)));
+}
+
+/// Flag, icon and name for an entry. Returns the name style used.
+fn push_entry_head<'a>(
+    spans: &mut Vec<Span<'a>>,
+    app: &'a App,
+    node: &'a Node,
+    cols: &Cols,
+    prefix: &str,
+    name_w: usize,
+    p: impl Fn(Style) -> Style,
+) -> Style {
+    let st = &app.theme.styles;
+    let hidden = node.name.starts_with('.');
+    let name_style = if node.has(flags::EXCLUDED) {
+        st.excluded
+    } else if node.has(flags::ERR) {
+        st.error
+    } else if hidden {
+        st.hidden
+    } else {
+        match node.kind {
+            Kind::Dir => st.dir,
+            Kind::File => st.file,
+            Kind::Symlink => st.symlink,
+            Kind::Other => st.special,
+        }
+    };
+
+    if cols.flag > 0 {
+        let flag = node
+            .flag_char()
+            .map(|c| format!("{c} "))
+            .unwrap_or_else(|| "  ".into());
+        let flag_style = if node.has(flags::ERR) {
+            st.error
+        } else {
+            st.flag
+        };
+        spans.push(Span::styled(flag, p(flag_style)));
+    }
+    if !prefix.is_empty() {
+        // Guides in one style, the trailing "+ " / "- " toggle in another.
+        let split = prefix.len() - 2;
+        let (guides, toggle) = prefix.split_at(split);
+        spans.push(Span::styled(guides.to_string(), p(st.tree_guide)));
+        spans.push(Span::styled(toggle.to_string(), p(st.tree_toggle)));
+    }
+    if cols.icon > 0 {
+        let icon = if prefix.is_empty() {
+            app.icons.for_node(node)
+        } else {
+            app.icons.for_tree_node(node)
+        };
+        spans.push(Span::styled(format!("{icon} "), p(name_style)));
+    }
+    spans.push(Span::styled(format::fit(&node.name, name_w), p(name_style)));
+    name_style
+}
+
+/// Size, bar, percent, count and mtime columns.
+fn push_metrics<'a>(
+    spans: &mut Vec<Span<'a>>,
+    app: &'a App,
+    node: &Node,
+    fill: f64,
+    share: f64,
+    cols: &Cols,
+    p: impl Fn(Style) -> Style,
+) {
+    let st = &app.theme.styles;
+    let size = node.size_of(app.apparent);
+    let (num, unit) = format::bytes(size, app.si);
+    spans.push(Span::styled(format!(" {num:>5} "), p(st.size)));
+    spans.push(Span::styled(format!("{unit:<3}"), p(st.size_unit)));
+
+    if cols.bar > 0 {
+        let width = (cols.bar - 1) as usize;
+        let filled = ((fill.clamp(0.0, 1.0)) * width as f64).round() as usize;
+        let bar = &app.theme.bar;
+        let filled_style = if bar.gradient {
+            Style::new().fg(theme::gradient(bar, share))
+        } else {
+            st.bar_filled
+        };
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(bar.filled.repeat(filled), p(filled_style)));
+        spans.push(Span::styled(
+            bar.empty.repeat(width - filled),
+            p(st.bar_empty),
+        ));
+    }
+    if cols.percent > 0 {
+        spans.push(Span::styled(
+            format!(" {:>6}", format::percent(share)),
+            p(st.percent),
+        ));
+    }
+    if cols.count > 0 {
+        let text = if node.is_dir() {
+            format::count(node.items)
+        } else {
+            String::new()
+        };
+        spans.push(Span::styled(format!(" {text:>9}"), p(st.count)));
+    }
+    if cols.mtime > 0 {
+        let text = format::mtime(node.mtime, &app.config.date_format);
+        spans.push(Span::styled(
+            format!(" {}", format::fit(&text, (cols.mtime - 1) as usize)),
+            p(st.mtime),
+        ));
     }
 }
 
@@ -342,7 +440,11 @@ impl RenderTo for Line<'_> {
 fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     let st = &app.theme.styles;
     frame.buffer_mut().set_style(area, st.status);
-    let Some(dir) = app.current() else { return };
+    let node = match app.view {
+        View::List => app.current(),
+        View::Tree => app.tree.as_ref(),
+    };
+    let Some(dir) = node else { return };
     let icons = app.icons.emoji();
 
     let mut spans: Vec<Span> = vec![Span::raw(" ")];
@@ -356,12 +458,16 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     spans.push(Span::styled(" items", st.status));
 
     spans.push(Span::styled("  ·  ", st.status));
-    let arrow = match (app.sort, app.sort_reverse) {
-        (SortKey::Name, false) => "↓",
-        (SortKey::Name, true) => "↑",
-        (_, false) => "↓",
-        (_, true) => "↑",
-    };
+    spans.push(Span::styled(
+        match app.view {
+            View::List => "list",
+            View::Tree => "tree",
+        },
+        st.status,
+    ));
+
+    spans.push(Span::styled("  ·  ", st.status));
+    let arrow = if app.sort_reverse { "↑" } else { "↓" };
     spans.push(Span::styled(format!("{arrow} "), st.status_accent));
     spans.push(Span::styled(app.sort.label(), st.status));
     if app.dirs_first {
@@ -417,11 +523,29 @@ fn draw_keybar(frame: &mut Frame, area: Rect, app: &App) {
             ("Esc", "clear"),
             ("↑↓", "move"),
         ]
+    } else if app.view == View::Tree {
+        &[
+            ("↑↓", "move"),
+            ("+ -", "expand/collapse"),
+            ("*", "expand all"),
+            ("Tab", "list"),
+            ("s", "size"),
+            ("n", "name"),
+            ("b", "bar"),
+            ("/", "filter"),
+            ("i", "info"),
+            ("d", "delete"),
+            ("r", "rescan"),
+            ("T", "theme"),
+            ("?", "help"),
+            ("Esc", "quit"),
+        ]
     } else {
         &[
             ("↑↓", "move"),
             ("⏎", "open"),
             ("⌫", "up"),
+            ("Tab", "tree"),
             ("s", "size"),
             ("n", "name"),
             ("b", "bar"),
@@ -432,7 +556,7 @@ fn draw_keybar(frame: &mut Frame, area: Rect, app: &App) {
             ("r", "rescan"),
             ("T", "theme"),
             ("?", "help"),
-            ("q", "quit"),
+            ("Esc", "quit"),
         ]
     };
 

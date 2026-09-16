@@ -62,6 +62,8 @@ scan_label    = { fg = "base01" }
 scan_value    = { fg = "base02", bold = true }
 scan_path     = { fg = "base1" }
 filter        = { fg = "orange", bold = true }
+tree_guide    = { fg = "base1" }
+tree_toggle   = { fg = "orange", bold = true }
 
 [bar]
 gradient = true

@@ -359,6 +359,17 @@ impl IconSet {
         self.mode == IconMode::Emoji
     }
 
+    /// Icon for a node in the tree view: expanded directories with the plain
+    /// folder icon get the open-folder icon instead.
+    pub fn for_tree_node(&self, node: &Node) -> &str {
+        let icon = self.for_node(node);
+        if node.is_dir() && node.expanded && icon == self.dir {
+            &self.dir_open
+        } else {
+            icon
+        }
+    }
+
     /// Icon for a node in a listing.
     pub fn for_node(&self, node: &Node) -> &str {
         if self.mode == IconMode::None {
@@ -441,6 +452,7 @@ mod tests {
             mtime: 0,
             items: 0,
             flags,
+            expanded: false,
             children: vec![],
         }
     }

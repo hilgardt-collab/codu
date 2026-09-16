@@ -21,7 +21,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Popup::None => {}
         Popup::Help { scroll } => help(frame, app, *scroll),
         Popup::Info => info(frame, app),
-        Popup::Confirm { mode, child } => confirm(frame, app, *mode, *child),
+        Popup::Confirm { mode, path } => confirm(frame, app, *mode, path),
         Popup::Themes { cursor, .. } => themes(frame, app, *cursor),
         Popup::Message {
             title,
@@ -66,9 +66,22 @@ const HELP: &[(&str, &str)] = &[
     ("↑ k / ↓ j", "move selection"),
     ("PgUp PgDn", "page up / down"),
     ("Home g / End G", "first / last entry"),
-    ("→ ⏎ l", "open directory"),
-    ("← ⌫ h", "parent directory"),
+    ("Tab  v", "switch between list and tree view"),
     ("/", "filter listing (Esc clears)"),
+    ("", ""),
+    ("", "List view"),
+    (
+        "→ ⏎ l",
+        "open directory (on .. at the top: scan the parent)",
+    ),
+    ("← ⌫ h", "parent directory"),
+    ("", ""),
+    ("", "Tree view"),
+    ("+ = → l", "expand (→ again steps into the first child)"),
+    ("- ← h", "collapse (← again jumps to the parent)"),
+    ("Space ⏎", "toggle expand/collapse"),
+    ("*", "expand everything below"),
+    ("⌫", "jump to the parent row"),
     ("", ""),
     ("", "Sort & view"),
     (
@@ -86,9 +99,12 @@ const HELP: &[(&str, &str)] = &[
     ("i", "info about the selected entry"),
     ("d", "delete permanently (asks first)"),
     ("D", "move to trash (asks first)"),
-    ("r", "rescan current directory"),
+    ("r", "rescan (list: current directory, tree: selected)"),
     ("?  F1", "this help"),
-    ("q  Ctrl-C", "quit"),
+    (
+        "Esc  Ctrl-C",
+        "quit (Esc first closes popups / clears the filter)",
+    ),
     ("", ""),
     ("", "Flags"),
     ("!", "directory could not be read"),
@@ -101,7 +117,7 @@ const HELP: &[(&str, &str)] = &[
     ("", ""),
     (
         "",
-        "Mouse: click selects, double-click opens, wheel scrolls.",
+        "Mouse: click selects, double-click opens/toggles, wheel scrolls.",
     ),
 ];
 
@@ -125,7 +141,7 @@ fn help(frame: &mut Frame, app: &App, scroll: u16) {
                 Line::from(Span::styled(format!(" {desc}"), st.popup_title))
             } else {
                 Line::from(vec![
-                    Span::styled(format!("  {}", format::fit(key, 15)), st.help_key),
+                    Span::styled(format!("  {}", format::fit(key, 14)), st.help_key),
                     Span::styled(*desc, st.help_desc),
                 ])
             }
@@ -141,13 +157,22 @@ fn info(frame: &mut Frame, app: &App) {
     let Some(node) = app.selected_node() else {
         return;
     };
-    let Some(dir) = app.current() else { return };
-    let path = app.current_path().join(&*node.name);
-    let dir_size = dir.size_of(app.apparent);
-    let share = if dir_size > 0 {
-        node.size_of(app.apparent) as f64 / dir_size as f64
+    let Some(tree_path) = app.selected_path() else {
+        return;
+    };
+    let path = app.fs_path(&tree_path);
+    let base = app.selected_share_base();
+    let share = if base > 0 {
+        node.size_of(app.apparent) as f64 / base as f64
     } else {
         0.0
+    };
+    let parent_label = match tree_path.split_last() {
+        Some((_, p)) if !p.is_empty() => {
+            format::truncate_left(&app.fs_path(p).display().to_string(), 40)
+        }
+        Some(_) => "root".to_string(),
+        None => "itself".to_string(),
     };
 
     let (subdirs, files) = if node.is_dir() {
@@ -179,15 +204,7 @@ fn info(frame: &mut Frame, app: &App) {
         ),
         (
             "Share",
-            format!(
-                "{} of {}",
-                format::percent(share),
-                if app.path.is_empty() {
-                    "root".to_string()
-                } else {
-                    format::truncate_left(&app.current_path().display().to_string(), 40)
-                }
-            ),
+            format!("{} of {}", format::percent(share), parent_label),
         ),
     ];
     if node.is_dir() {
@@ -270,12 +287,10 @@ fn wrap(s: &str, width: usize) -> Vec<String> {
     out
 }
 
-fn confirm(frame: &mut Frame, app: &App, mode: DeleteMode, child: usize) {
+fn confirm(frame: &mut Frame, app: &App, mode: DeleteMode, path: &[usize]) {
     let st = &app.theme.styles;
-    let Some(dir) = app.current() else { return };
-    let Some(node) = dir.children.get(child) else {
-        return;
-    };
+    let Some(tree) = &app.tree else { return };
+    let node = crate::app::node_at(tree, path);
     let (title, verb, danger) = match mode {
         DeleteMode::Permanent => (
             format!("{}Delete permanently", icon_or(app, "❌ ")),

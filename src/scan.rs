@@ -56,6 +56,8 @@ pub struct Node {
     /// Number of descendants (files + directories), 0 for leaves.
     pub items: u64,
     pub flags: u8,
+    /// Tree-view state: whether this directory's children are shown.
+    pub expanded: bool,
     pub children: Vec<Node>,
 }
 
@@ -73,7 +75,18 @@ impl Node {
             mtime,
             items: 0,
             flags: 0,
+            expanded: false,
             children: Vec::new(),
+        }
+    }
+
+    /// Expand or collapse this node and every directory beneath it.
+    pub fn set_expanded_recursive(&mut self, expanded: bool) {
+        if self.is_dir() {
+            self.expanded = expanded;
+        }
+        for c in &mut self.children {
+            c.set_expanded_recursive(expanded);
         }
     }
 

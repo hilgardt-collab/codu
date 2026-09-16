@@ -70,6 +70,7 @@ pub mod tests {
             mtime: 1_700_000_000,
             items: 0,
             flags: fl,
+            expanded: false,
             children: vec![],
         }
     }
@@ -85,6 +86,7 @@ pub mod tests {
             mtime: 1_700_000_000,
             items,
             flags: 0,
+            expanded: false,
             children,
         }
     }
@@ -127,7 +129,9 @@ pub mod tests {
         // Discard the real background scan and install the fixture.
         app.scan = None;
         app.tree = Some(tree);
+        app.tree.as_mut().unwrap().expanded = true;
         app.rebuild_rows(None);
+        app.cursor = 1;
         let _ = Arc::strong_count(&app.scan_options);
         app
     }
@@ -171,9 +175,10 @@ pub mod tests {
         assert!(screen.contains("👻 .cache"));
         assert!(screen.contains("@ 🔗 link"));
         assert!(screen.contains("11.5 GiB"));
-        assert!(screen.contains("1/7"));
+        assert!(screen.contains("📂 .."));
+        assert!(screen.contains("2/8"));
         assert!(screen.contains("↑↓  move"));
-        assert!(render(&mut app, 160, 16).contains("q  quit"));
+        assert!(render(&mut app, 170, 16).contains("Esc  quit"));
     }
 
     #[test]
@@ -215,6 +220,45 @@ pub mod tests {
     }
 
     #[test]
+    fn tree_view_renders_guides_and_toggles() {
+        let mut app = app_for(sample_tree(), "catppuccin-mocha", IconMode::Emoji);
+        app.on_key(ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Tab,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+        app.on_key(ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Char('+'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+        let screen = render(&mut app, 100, 16);
+        println!("{screen}");
+        assert!(screen.contains("- 📂 /home/user/Documents"));
+        assert!(screen.contains("├─- 📂 GitHub"));
+        assert!(screen.contains("│  ├─  🦀 main.rs"));
+        assert!(screen.contains("│  └─  🦀 Cargo.toml"));
+        assert!(screen.contains("├─  📦 archive.tar.gz"));
+        assert!(screen.contains("├─+ 📁 secret") || screen.contains("├─+ ❗ secret"));
+        assert!(screen.contains("└─  🔗 link"));
+        assert!(screen.contains("tree"));
+        assert!(screen.contains("+ -  expand/collapse"));
+        // Size column stays aligned regardless of depth.
+        let cols: Vec<usize> = screen
+            .lines()
+            .filter(|l| l.starts_with('│'))
+            .filter_map(|l| {
+                let idx = l
+                    .find(" GiB")
+                    .or_else(|| l.find(" MiB"))
+                    .or_else(|| l.find(" KiB"))
+                    .or_else(|| l.find(" B "))?;
+                Some(crate::format::width(&l[..idx]))
+            })
+            .collect();
+        assert!(cols.len() >= 6, "{screen}");
+        assert!(cols.iter().all(|&c| c == cols[0]), "misaligned:\n{screen}");
+    }
+
+    #[test]
     fn popups_render() {
         let mut app = app_for(sample_tree(), "dracula", IconMode::Emoji);
         app.popup = crate::app::Popup::Help { scroll: 0 };
@@ -227,7 +271,7 @@ pub mod tests {
         );
         app.popup = crate::app::Popup::Confirm {
             mode: crate::app::DeleteMode::Trash,
-            child: 0,
+            path: vec![0],
         };
         assert!(render(&mut app, 100, 40).contains("Move to trash"));
         app.popup = crate::app::Popup::Themes {

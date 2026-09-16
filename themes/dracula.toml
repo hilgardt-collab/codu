@@ -58,6 +58,8 @@ scan_label    = { fg = "comment" }
 scan_value    = { fg = "fg", bold = true }
 scan_path     = { fg = "comment" }
 filter        = { fg = "yellow", bold = true }
+tree_guide    = { fg = "comment" }
+tree_toggle   = { fg = "pink", bold = true }
 
 [bar]
 gradient = true

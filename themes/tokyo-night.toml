@@ -63,6 +63,8 @@ scan_label    = { fg = "fg_dark" }
 scan_value    = { fg = "fg", bold = true }
 scan_path     = { fg = "comment" }
 filter        = { fg = "yellow", bold = true }
+tree_guide    = { fg = "terminal_black" }
+tree_toggle   = { fg = "orange", bold = true }
 
 [bar]
 gradient = true

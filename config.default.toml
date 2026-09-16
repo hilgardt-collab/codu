@@ -11,6 +11,10 @@ theme = "catppuccin-mocha"
 # Icon column: "emoji", "ascii", or "none".
 icons = "emoji"
 
+# Initial view: "list" (one directory at a time) or "tree" (collapsible
+# tree of the whole scan). Switch at any time with Tab.
+view = "list"
+
 # Mouse support: click to select, double-click to open, wheel to scroll.
 mouse = true
 

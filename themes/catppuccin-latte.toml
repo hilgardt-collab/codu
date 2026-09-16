@@ -72,6 +72,8 @@ scan_label    = { fg = "subtext0" }
 scan_value    = { fg = "text", bold = true }
 scan_path     = { fg = "overlay1" }
 filter        = { fg = "peach", bold = true }
+tree_guide    = { fg = "surface2" }
+tree_toggle   = { fg = "mauve", bold = true }
 
 [bar]
 gradient = true

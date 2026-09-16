@@ -24,8 +24,13 @@ restyle every part of the interface.
 
 - **Fast parallel scan** using a work-stealing thread pool, with a live
   progress screen (items, bytes, elapsed, current path).
+- **Two views**: an ncdu-style directory list, and a collapsible tree of the
+  whole scan with `+`/`-` toggles. `Tab` switches between them and keeps
+  your selection.
 - **ncdu-compatible keys** so you already know how to use it, plus vim keys
-  and mouse support (click, double-click, wheel).
+  and mouse support (click, double-click, wheel). `Esc` quits.
+- **Walk up** past where you started: the `..` row at the top of the root
+  listing scans the parent directory.
 - **Themes**: eight built in (Catppuccin Mocha/Latte, Dracula, Gruvbox Dark,
   Nord, Tokyo Night, Solarized Light, and a 16-colour `ansi` fallback), a
   live in-app picker, and TOML theme files where every UI element, the bar
@@ -54,6 +59,7 @@ cdu [OPTIONS] [PATH]
   -c, --config <FILE>     alternative config file
   -T, --theme <NAME>      theme name or path to a .toml file
       --icons <MODE>      emoji | ascii | none
+      --tree              start in tree view
   -x, --one-file-system   do not cross filesystem boundaries
       --exclude <GLOB>    exclude matching entries (repeatable)
       --apparent-size     show apparent sizes instead of disk usage
@@ -72,25 +78,59 @@ cdu [OPTIONS] [PATH]
 |----------------------------|-------------------------------------------------------|
 | `↑` `k` / `↓` `j`          | move selection                                        |
 | `PgUp` `PgDn`, `Home` `g`, `End` `G` | page, first, last                           |
-| `→` `⏎` `l`                | open directory                                        |
+| `Tab` `v`                  | switch between list view and tree view                |
+| `/`                        | filter the listing (`Esc` clears)                     |
+| **List view**              |                                                       |
+| `→` `⏎` `l`                | open directory; on the `..` row at the top of the scanned root, scan the parent directory |
 | `←` `⌫` `h`                | parent directory                                      |
+| **Tree view**              |                                                       |
+| `+` `=` `→` `l`            | expand (`→` again steps into the first child)         |
+| `-` `←` `h`                | collapse (`←` again jumps to the parent)              |
+| `Space` `⏎`                | toggle                                                |
+| `*`                        | expand everything below the selection                 |
+| `⌫`                        | jump to the parent row                                |
+| **Sort & view**            |                                                       |
 | `s` `n` `C` `M`            | sort by size / name / items / mtime (again: reverse)  |
 | `t`                        | directories first                                     |
 | `a`                        | disk usage ↔ apparent size                            |
 | `b`                        | bar+percent → bar → percent → none                    |
 | `c` `m`                    | item-count / mtime column                             |
 | `e`                        | show/hide hidden entries                              |
-| `/`                        | filter the listing (`Esc` clears)                     |
+| **Actions**                |                                                       |
 | `i`                        | info popup                                            |
 | `d` / `D`                  | delete permanently / move to trash (asks first)       |
-| `r`                        | rescan current directory                              |
+| `r`                        | rescan (list: current directory; tree: selected)      |
 | `T`                        | theme picker with live preview                        |
 | `?` `F1`                   | help                                                  |
-| `q` `Ctrl-C`               | quit                                                  |
+| `Esc` `Ctrl-C`             | quit (`Esc` first closes popups / clears the filter)  |
 
 Entry flags follow ncdu: `!` unreadable, `.` unreadable subdirectory,
 `<` excluded, `>` other filesystem, `@` symlink/special, `H` hard link
 counted elsewhere, `e` empty directory.
+
+### Tree view
+
+`Tab` switches to a collapsible tree of the whole scan. Directories carry a
+`+` (collapsed) or `-` (expanded) toggle; sizes, bars and percentages are all
+relative to the scanned root so the picture stays consistent as you open
+branches. Switching back with `Tab` drops you into the directory of whatever
+you had selected.
+
+```
+ 💽 cdu  /home/user/Documents                                     🌙 Catppuccin Mocha
+╭────────────────────────────────────────────────────────────────────────────────────╮
+│    📂 ..                                                                           │
+│    - 📂 /home/user/Documents               16.3 GiB ████████████████████████ 100.0%│
+│▸   ├─- 📂 GitHub                           11.5 GiB █████████████████░░░░░░░  70.7%│
+│    │  ├─  🦀 main.rs                       11.5 GiB █████████████████░░░░░░░  70.7%│
+│    │  └─  🦀 Cargo.toml                    1000 B   ░░░░░░░░░░░░░░░░░░░░░░░░   0.0%│
+│    ├─  📦 archive.tar.gz                    2.9 GiB ████░░░░░░░░░░░░░░░░░░░░  17.7%│
+│    ├─+ 📁 secret                            4.0 KiB ░░░░░░░░░░░░░░░░░░░░░░░░   0.0%│
+│  @ └─  🔗 link                                0 B   ░░░░░░░░░░░░░░░░░░░░░░░░   0.0%│
+╰────────────────────────────────────────────────────────────────────────────── 3/11 ╯
+ 💾 16.3 GiB in 9 items  ·  tree  ·  ↓ size  ·  disk usage
+ ↑↓  move   + -  expand/collapse   *  expand all   Tab  list   s  size   n  name
+```
 
 ## Configuration
 
@@ -100,6 +140,7 @@ default config. Every key is optional:
 ```toml
 theme = "catppuccin-mocha"
 icons = "emoji"          # emoji | ascii | none
+view = "list"            # list | tree (Tab switches at runtime)
 mouse = true
 borders = true
 si = false
@@ -142,7 +183,7 @@ dark = true                       # picks the 🌙 / 🌞 header badge
 blue = "#89b4fa"
 base = "#1e1e2e"
 
-[styles]                          # any of the 41 element keys
+[styles]                          # any of the 43 element keys
 background = { bg = "base" }
 dir        = { fg = "blue", bold = true }
 selected   = { bg = "#45475a", bold = true }
@@ -176,7 +217,7 @@ border_title selected marker dir file symlink special hidden excluded error
 flag size size_unit percent count mtime bar_filled bar_empty status
 status_accent keybar_key keybar_label popup popup_border popup_title help_key
 help_desc danger warning success spinner scan_label scan_value scan_path
-filter`.
+filter tree_guide tree_toggle`.
 
 ### About emoji widths
 

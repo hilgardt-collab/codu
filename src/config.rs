@@ -41,6 +41,13 @@ impl BarMode {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+pub enum View {
+    List,
+    Tree,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub enum SortKey {
     Size,
     Name,
@@ -64,6 +71,7 @@ impl SortKey {
 pub struct Config {
     pub theme: String,
     pub icons: IconMode,
+    pub view: View,
     pub mouse: bool,
     pub borders: bool,
     pub si: bool,
@@ -89,6 +97,7 @@ impl Default for Config {
         Config {
             theme: "catppuccin-mocha".into(),
             icons: IconMode::Emoji,
+            view: View::List,
             mouse: true,
             borders: true,
             si: false,
@@ -151,6 +160,7 @@ mod tests {
         let def = Config::default();
         assert_eq!(parsed.theme, def.theme);
         assert_eq!(parsed.icons, def.icons);
+        assert_eq!(parsed.view, def.view);
         assert_eq!(parsed.bar_mode, def.bar_mode);
         assert_eq!(parsed.bar_width, def.bar_width);
         assert_eq!(parsed.sort, def.sort);

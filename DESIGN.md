@@ -102,6 +102,7 @@ delete/trash**, **theme picker** (live preview while moving the cursor),
 ```
 
 * `mark` – `▸` on the selected row (theme-configurable).
+* in tree view, guide lines and a `+`/`-` toggle precede the icon.
 * `flag` – one char, ncdu-compatible: `!` read error, `.` error in a
   subdirectory, `@` symlink/special, `H` hard link already counted,
   `e` empty dir, `>` other filesystem, `<` excluded.
@@ -126,8 +127,13 @@ percent/count columns drop, so the tool stays usable in a split pane.
 |--------------------------|-----------------------------------------------------|
 | `↑`/`k`, `↓`/`j`         | move selection                                      |
 | `PgUp`/`PgDn`, `Home`/`End`, `g`/`G` (vim) | page / jump                       |
-| `→`/`Enter`/`l`          | open directory                                      |
-| `←`/`h`/`Backspace`      | go to parent                                        |
+| `Tab` / `v`              | switch list view ↔ tree view (selection is kept)    |
+| `→`/`Enter`/`l` (list)   | open directory; on the root's `..`: scan the parent |
+| `←`/`h`/`Backspace` (list) | go to parent directory                            |
+| `+` `=` `→` `l` (tree)   | expand (`→` again steps into the first child)       |
+| `-` `←` `h` (tree)       | collapse (`←` again jumps to the parent)            |
+| `Space`/`Enter` (tree)   | toggle expand/collapse                              |
+| `*` (tree)               | expand everything below the selection               |
 | `s` `n` `C` `M`          | sort by size / name / count / mtime (again = reverse) |
 | `t`                      | toggle directories-first                            |
 | `a`                      | toggle disk usage ↔ apparent size                   |
@@ -137,14 +143,49 @@ percent/count columns drop, so the tool stays usable in a split pane.
 | `/`                      | filter current listing (type, `Esc` clears)         |
 | `i`                      | info popup for selected entry                       |
 | `d` / `D`                | delete permanently / move to trash (confirm first)  |
-| `r`                      | rescan the current directory                        |
+| `r`                      | rescan (list: current directory; tree: selection)   |
 | `T`                      | theme picker                                        |
-| `?`                      | help                                                |
-| `q` / `Ctrl-C`           | quit (`Esc` closes popups)                          |
-| mouse                    | click select, double-click open, wheel scroll       |
+| `?` / `F1`               | help                                                |
+| `Esc` / `Ctrl-C`         | quit; `Esc` first closes popups and clears a filter |
+| mouse                    | click select, double-click open/toggle, wheel scroll|
 
-Note: ncdu uses `g` for the graph toggle; `cdu` uses `b` because `g`/`G`
-are reserved for vim-style jump-to-top/bottom.
+Notes: ncdu uses `g` for the graph toggle; `cdu` uses `b` because `g`/`G`
+are reserved for vim-style jump-to-top/bottom. `q` is deliberately unbound
+so a stray keypress never exits; `Esc` is the exit key.
+
+### The `..` row
+
+Every listing, including the scanned root, starts with a `..` row. Inside
+the scan it goes up one level. At the root it scans the parent directory
+and makes it the new root, with the previous root pre-selected, so you can
+walk up the filesystem without restarting. The scan is cancellable with
+`Esc`, which keeps the current view.
+
+### Tree view
+
+```
+ │    📂 ..                                                                   │
+ │    - 📂 /home/user/Documents               16.3 GiB ████████████████ 100.0%│
+ │▸   ├─- 📂 GitHub                           11.5 GiB ███████████░░░░░  70.7%│
+ │    │  ├─  🦀 main.rs                       11.5 GiB ███████████░░░░░  70.7%│
+ │    │  └─  🦀 Cargo.toml                    1000 B   ░░░░░░░░░░░░░░░░   0.0%│
+ │    ├─+ 📁 secret                            4.0 KiB ░░░░░░░░░░░░░░░░   0.0%│
+ │  @ └─  🔗 link                                0 B   ░░░░░░░░░░░░░░░░   0.0%│
+```
+
+* The tree is the same data as the list; `expanded` is a per-node flag.
+  Rows are flattened depth-first from the root on every structural change
+  (expand, collapse, sort, filter, delete, rescan), not on cursor movement.
+* Guide lines (`│ ├─ └─`) are drawn per ancestor level; on very deep paths
+  the guides compress to `…<depth>` so the name column stays readable.
+* Directories show `+`/`-`, files a blank toggle. Expanded directories use
+  the open-folder icon.
+* Bars and percentages are relative to the scanned root, not to siblings,
+  so a branch keeps its meaning when opened next to others.
+* Filtering keeps directories visible so the structure stays navigable;
+  files must match.
+* Switching views carries the selection: list → tree expands the path to
+  the current directory; tree → list opens the selected entry's directory.
 
 ## 3. Theming
 

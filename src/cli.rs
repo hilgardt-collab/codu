@@ -30,6 +30,10 @@ pub struct Cli {
     #[arg(long, value_enum, value_name = "MODE")]
     pub icons: Option<IconArg>,
 
+    /// Start in tree view instead of the directory list
+    #[arg(long)]
+    pub tree: bool,
+
     /// Stay on the same filesystem as the scanned directory
     #[arg(short = 'x', long)]
     pub one_file_system: bool,
