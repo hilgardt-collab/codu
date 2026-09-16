@@ -120,6 +120,8 @@ pub struct Config {
     pub threads: usize,
     pub confirm_delete: bool,
     pub read_only: bool,
+    /// With the shell integration installed, exit into the shown directory.
+    pub cd_on_exit: bool,
     pub date_format: String,
 }
 
@@ -148,6 +150,7 @@ impl Default for Config {
             threads: 0,
             confirm_delete: true,
             read_only: false,
+            cd_on_exit: true,
             date_format: "%Y-%m-%d %H:%M".into(),
         }
     }

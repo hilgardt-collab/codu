@@ -457,6 +457,28 @@ impl App {
     }
 
     /// Path shown in the header for the active view.
+    /// The directory the user was looking at, for cd-on-exit: the listed
+    /// directory in list view, the selected entry's directory in tree view,
+    /// and the scanned root from the volumes screen.
+    pub fn shown_directory(&self) -> Option<PathBuf> {
+        self.tree.as_ref()?;
+        if self.volumes.is_some() {
+            return Some(self.root_path.clone());
+        }
+        match self.view {
+            View::List => Some(self.current_path()),
+            View::Tree => {
+                let path = self.selected_path().unwrap_or_default();
+                let node = self.tree.as_ref().map(|t| node_at(t, &path))?;
+                if node.is_dir() && !node.has(scan::flags::OTHER_FS) {
+                    Some(self.fs_path(&path))
+                } else {
+                    Some(self.fs_path(&path[..path.len().saturating_sub(1)]))
+                }
+            }
+        }
+    }
+
     pub fn header_path(&self) -> PathBuf {
         match self.view {
             View::List => self.current_path(),
@@ -1396,6 +1418,7 @@ impl App {
                 KeyCode::Char('B') => self.config.borders = !self.config.borders,
                 KeyCode::Char('k') => self.config.key_guide = self.config.key_guide.next(),
                 KeyCode::Char('X') => self.toggle_cross_volumes(),
+                KeyCode::Char('W') => self.config.cd_on_exit = !self.config.cd_on_exit,
                 KeyCode::Char('v') | KeyCode::Tab => self.switch_view(),
                 KeyCode::Esc | KeyCode::Char('o') | KeyCode::Enter => self.popup = Popup::None,
                 _ => {}
@@ -2279,6 +2302,24 @@ mod tests {
         assert!(!app.scan_options.one_file_system);
         assert!(app.is_scanning(), "toggling rescans the root");
         assert!(app.scan.as_ref().unwrap().target.is_empty());
+    }
+
+    #[test]
+    fn shown_directory_follows_the_view() {
+        let mut app = app_with(sample());
+        assert_eq!(app.shown_directory(), Some(PathBuf::from("/root")));
+        app.enter(); // into big
+        assert_eq!(app.shown_directory(), Some(PathBuf::from("/root/big")));
+        app.switch_view(); // tree, selection is "big"
+        assert_eq!(app.shown_directory(), Some(PathBuf::from("/root/big")));
+        app.on_key(key(KeyCode::Char('+')));
+        app.on_key(key(KeyCode::Down)); // file "x" inside big
+        assert_eq!(app.shown_directory(), Some(PathBuf::from("/root/big")));
+        app.cursor = 1; // root row
+        assert_eq!(app.shown_directory(), Some(PathBuf::from("/root")));
+        app.on_key(key(KeyCode::Char('o')));
+        app.on_key(key(KeyCode::Char('W')));
+        assert!(!app.config.cd_on_exit);
     }
 
     #[test]

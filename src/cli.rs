@@ -81,6 +81,26 @@ pub struct Cli {
     /// Print the default config.toml to stdout and exit
     #[arg(long)]
     pub dump_config: bool,
+
+    /// On exit, write the directory that was being shown to this file
+    /// (used by the shell integration, see --shell)
+    #[arg(long, value_name = "FILE")]
+    pub cwd_file: Option<std::path::PathBuf>,
+
+    /// Print a shell function that makes `cdu` change into the shown directory on exit
+    #[arg(long, value_enum, value_name = "SHELL")]
+    pub shell: Option<ShellArg>,
+
+    /// Do not change the shell's directory on exit for this run
+    #[arg(long)]
+    pub no_cd: bool,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum ShellArg {
+    Bash,
+    Zsh,
+    Fish,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]

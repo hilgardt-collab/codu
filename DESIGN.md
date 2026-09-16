@@ -191,6 +191,17 @@ walk up the filesystem without restarting. The scan is cancellable with
   from sysfs; removable/optical from sysfs; usage via `libc::statvfs`.
   RAID and LVM members are skipped (their assembled devices are listed).
 
+### Change directory on exit
+
+A process cannot change its parent shell's directory, so cdu follows the
+yazi/ranger pattern: `--cwd-file FILE` makes it write the shown directory
+(list view: the listed directory; tree view: the selected entry's directory;
+volumes screen: the scanned root) on exit, and `cdu --shell bash|zsh|fish`
+prints a wrapper function that runs the binary with a temp file and `cd`s
+into the result. `cd-on-exit` (config, `W` in options, `--no-cd`) gates
+both the write and the reminder that is printed when the user quits from a
+different directory than they started in without the wrapper installed.
+
 ### Tree view
 
 ```

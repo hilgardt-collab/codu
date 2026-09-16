@@ -71,5 +71,10 @@ confirm-delete = true
 # Disable delete/trash entirely (same as -r).
 read-only = false
 
+# When quitting, make the shell change into the directory that was shown.
+# Needs the shell integration: add  eval "$(cdu --shell bash)"  (or zsh /
+# fish) to your shell config. Toggle at runtime with W in the options popup.
+cd-on-exit = true
+
 # strftime-style format for the mtime column.
 date-format = "%Y-%m-%d %H:%M"

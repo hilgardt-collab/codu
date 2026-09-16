@@ -32,7 +32,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.dump_config {
-        print!("{DEFAULT_CONFIG_TOML}");
+        emit(DEFAULT_CONFIG_TOML);
         return Ok(());
     }
     if let Some(name) = &cli.dump_theme {
@@ -40,6 +40,10 @@ fn main() -> Result<()> {
     }
     if cli.list_themes {
         return list_themes();
+    }
+    if let Some(shell) = cli.shell {
+        emit(&shell_integration(shell));
+        return Ok(());
     }
 
     let mut config = Config::load(cli.config.as_deref())?;
@@ -77,6 +81,7 @@ fn main() -> Result<()> {
     }
 
     let mouse = config.mouse;
+    let start_dir = std::env::current_dir().unwrap_or_else(|_| root.clone());
     let mut app = App::new(config, theme, icons, root, scan_options, cli.volumes);
     if !warnings.is_empty() {
         app.set_status(warnings.join(" | "), true);
@@ -96,7 +101,85 @@ fn main() -> Result<()> {
         let _ = execute!(io::stdout(), DisableMouseCapture);
     }
     ratatui::restore();
+
+    if app.config.cd_on_exit && !cli.no_cd {
+        cd_on_exit(&app, cli.cwd_file.as_deref(), &start_dir);
+    }
     result
+}
+
+/// Write to stdout, ignoring a closed pipe (`cdu --shell bash | head`).
+fn emit(text: &str) {
+    let mut out = io::stdout().lock();
+    let _ = out.write_all(text.as_bytes());
+    let _ = out.flush();
+}
+
+/// Hand the shown directory to the shell wrapper, or explain how to set it up
+/// when the user navigated somewhere without the wrapper being installed.
+fn cd_on_exit(app: &App, cwd_file: Option<&std::path::Path>, start_dir: &std::path::Path) {
+    let Some(dir) = app.shown_directory() else {
+        return;
+    };
+    match cwd_file {
+        Some(file) => {
+            if let Err(e) = std::fs::write(file, dir.as_os_str().as_encoded_bytes()) {
+                eprintln!("cdu: could not write {}: {e}", file.display());
+            }
+        }
+        None => {
+            if dir != start_dir && std::io::IsTerminal::is_terminal(&io::stderr()) {
+                let shell = std::env::var("SHELL")
+                    .ok()
+                    .and_then(|s| s.rsplit('/').next().map(str::to_string))
+                    .filter(|s| matches!(s.as_str(), "bash" | "zsh" | "fish"))
+                    .unwrap_or_else(|| "bash".to_string());
+                eprintln!("cdu: you were in {}", dir.display());
+                eprintln!(
+                    "cdu: to land there on exit, add to your shell config:  eval \"$(cdu --shell {shell})\"   (or set cd-on-exit = false)"
+                );
+            }
+        }
+    }
+}
+
+/// Shell function that runs cdu with a temp cwd file and cds into the result.
+fn shell_integration(shell: cli::ShellArg) -> String {
+    match shell {
+        cli::ShellArg::Bash | cli::ShellArg::Zsh => {
+            r#"# cdu shell integration: run `eval "$(cdu --shell bash)"` from your rc file.
+cdu() {
+    local tmp cwd rc
+    tmp="$(mktemp -t cdu-cwd.XXXXXX)" || return
+    command cdu "$@" --cwd-file="$tmp"
+    rc=$?
+    cwd="$(cat -- "$tmp" 2>/dev/null)"
+    rm -f -- "$tmp"
+    if [ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && [ -d "$cwd" ]; then
+        builtin cd -- "$cwd" || return
+    fi
+    return $rc
+}
+"#
+            .to_string()
+        }
+        cli::ShellArg::Fish => {
+            r#"# cdu shell integration: run `cdu --shell fish | source` from config.fish.
+function cdu --wraps cdu --description 'cdu, changing directory on exit'
+    set -l tmp (mktemp -t cdu-cwd.XXXXXX); or return
+    command cdu $argv --cwd-file="$tmp"
+    set -l rc $status
+    set -l cwd (cat -- "$tmp" 2>/dev/null)
+    rm -f -- "$tmp"
+    if test -n "$cwd"; and test "$cwd" != "$PWD"; and test -d "$cwd"
+        builtin cd -- "$cwd"
+    end
+    return $rc
+end
+"#
+            .to_string()
+        }
+    }
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
@@ -190,13 +273,13 @@ fn normalize_trailing(p: PathBuf) -> PathBuf {
 
 fn dump_theme(name: &str) -> Result<()> {
     if let Some((_, text)) = BUILTIN.iter().find(|(id, _)| *id == name) {
-        print!("{text}");
+        emit(text);
         return Ok(());
     }
     if let Some(dir) = config::themes_dir() {
         let p = dir.join(format!("{name}.toml"));
         if p.is_file() {
-            print!("{}", std::fs::read_to_string(&p)?);
+            emit(&std::fs::read_to_string(&p)?);
             return Ok(());
         }
     }

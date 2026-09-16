@@ -505,6 +505,11 @@ fn options(frame: &mut Frame, app: &App) {
             check(app.config.one_file_system).into(),
             "stay on this volume (other mounts listed, not scanned; toggling rescans)".into(),
         ),
+        (
+            "W",
+            check(app.config.cd_on_exit).into(),
+            "change the shell's directory to the shown one on exit (needs `cdu --shell`)".into(),
+        ),
     ];
     let mut lines: Vec<Line> = vec![Line::default()];
     for (k, state, label) in rows {

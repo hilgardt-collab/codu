@@ -87,6 +87,9 @@ cdu [OPTIONS] [PATH]
       --list-themes       list built-in and user themes
       --dump-theme <NAME> print a theme's TOML to stdout
       --dump-config       print the default config.toml
+      --shell <SHELL>     print the bash/zsh/fish function for cd-on-exit
+      --cwd-file <FILE>   write the shown directory here on exit
+      --no-cd             do not change directory on exit this run
 ```
 
 ### Keys
@@ -207,6 +210,25 @@ you had selected.
  ↑↓  move   + -  expand/collapse   *  expand all   Tab  list   s  size   n  name
 ```
 
+## Change directory on exit
+
+With the shell integration installed, quitting cdu leaves your shell in the
+directory you were looking at (the listed directory in list view, the
+selected entry's directory in tree view). Add one line to your shell config:
+
+```sh
+# bash: ~/.bashrc          zsh: ~/.zshrc
+eval "$(cdu --shell bash)"      # or: eval "$(cdu --shell zsh)"
+# fish: ~/.config/fish/config.fish
+cdu --shell fish | source
+```
+
+The function runs cdu with `--cwd-file` pointing at a temporary file and
+`cd`s into whatever cdu wrote there. Turn the behaviour off with
+`cd-on-exit = false` in the config, `W` in the options popup, or `--no-cd`
+for one run. Without the integration, cdu prints a one-line reminder when
+you quit from somewhere other than where you started.
+
 ## Configuration
 
 `cdu --dump-config > ~/.config/cdu/config.toml` writes a fully commented
@@ -235,6 +257,7 @@ one-file-system = true   # stay on the starting volume; -X to cross
 threads = 0
 confirm-delete = true
 read-only = false
+cd-on-exit = true        # with `eval "$(cdu --shell bash)"` installed
 date-format = "%Y-%m-%d %H:%M"
 ```
 
