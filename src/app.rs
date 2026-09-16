@@ -1044,6 +1044,32 @@ impl App {
 
     /// Rescan: the current directory in list view, the selected directory
     /// (or its parent) in tree view.
+    /// Flip between staying on the starting volume and crossing into other
+    /// mounted volumes, then rescan the whole tree so the change is visible.
+    fn toggle_cross_volumes(&mut self) {
+        if self.is_scanning() {
+            return;
+        }
+        let one = !self.scan_options.one_file_system;
+        self.scan_options = Arc::new(ScanOptions {
+            one_file_system: one,
+            excludes: self.scan_options.excludes.clone(),
+        });
+        self.config.one_file_system = one;
+        self.set_status(
+            if one {
+                "staying on this volume; rescanning".into()
+            } else {
+                "scanning across all mounted volumes; rescanning".into()
+            },
+            false,
+        );
+        if self.tree.is_some() {
+            let root = self.root_path.clone();
+            self.start_scan(root, Vec::new(), None, None);
+        }
+    }
+
     fn refresh(&mut self) {
         if self.is_scanning() {
             return;
@@ -1369,6 +1395,7 @@ impl App {
                 }
                 KeyCode::Char('B') => self.config.borders = !self.config.borders,
                 KeyCode::Char('k') => self.config.key_guide = self.config.key_guide.next(),
+                KeyCode::Char('X') => self.toggle_cross_volumes(),
                 KeyCode::Char('v') | KeyCode::Tab => self.switch_view(),
                 KeyCode::Esc | KeyCode::Char('o') | KeyCode::Enter => self.popup = Popup::None,
                 _ => {}
@@ -1971,7 +1998,10 @@ mod tests {
             filter_editing: false,
             popup: Popup::None,
             scan: None,
-            scan_options: Arc::new(ScanOptions::default()),
+            scan_options: Arc::new(ScanOptions {
+                one_file_system: true,
+                excludes: None,
+            }),
             last_scan: None,
             status: None,
             should_quit: false,
@@ -2236,6 +2266,19 @@ mod tests {
         app.on_key(key(KeyCode::Esc));
         assert!(matches!(app.popup, Popup::None));
         assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn cross_volume_toggle_flips_scan_options_and_rescans() {
+        let mut app = app_with(typed_sample());
+        assert!(app.config.one_file_system);
+        assert!(app.scan_options.one_file_system);
+        app.on_key(key(KeyCode::Char('o')));
+        app.on_key(key(KeyCode::Char('X')));
+        assert!(!app.config.one_file_system);
+        assert!(!app.scan_options.one_file_system);
+        assert!(app.is_scanning(), "toggling rescans the root");
+        assert!(app.scan.as_ref().unwrap().target.is_empty());
     }
 
     #[test]

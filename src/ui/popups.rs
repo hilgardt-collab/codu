@@ -500,6 +500,11 @@ fn options(frame: &mut Frame, app: &App) {
             "   ".into(),
             format!("key guide: {}", app.config.key_guide.label()),
         ),
+        (
+            "X",
+            check(app.config.one_file_system).into(),
+            "stay on this volume (other mounts listed, not scanned; toggling rescans)".into(),
+        ),
     ];
     let mut lines: Vec<Line> = vec![Line::default()];
     for (k, state, label) in rows {

@@ -184,6 +184,7 @@ pub mod tests {
         assert!(screen.contains("@ 🔗 link"));
         assert!(screen.contains("11.5 GiB"));
         assert!(screen.contains("📂 .."));
+        assert!(screen.contains("this volume"));
         assert!(screen.contains("2/8"));
         assert!(screen.contains("↑↓ jk  move"));
         // The full guide wraps: every shortcut is visible even at 100 columns.

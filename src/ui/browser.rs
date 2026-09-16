@@ -579,6 +579,15 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
         },
         st.status,
     ));
+    spans.push(Span::styled("  ·  ", st.status));
+    spans.push(Span::styled(
+        if app.config.one_file_system {
+            "this volume"
+        } else {
+            "all volumes"
+        },
+        st.status,
+    ));
 
     if !app.filter.is_empty() || app.filter_editing {
         spans.push(Span::styled("  ·  ", st.status));

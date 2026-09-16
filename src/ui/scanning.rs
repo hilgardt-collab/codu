@@ -20,10 +20,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let rect = centered(area, width, 9);
 
     frame.render_widget(Clear, rect);
-    let title = if job.target.is_empty() {
-        " Scanning "
-    } else {
-        " Rescanning "
+    let title = match (job.target.is_empty(), app.scan_options.one_file_system) {
+        (true, true) => " Scanning (this volume only) ",
+        (true, false) => " Scanning (across all volumes) ",
+        (false, _) => " Rescanning ",
     };
     let block = Block::bordered()
         .border_type(BorderType::Rounded)

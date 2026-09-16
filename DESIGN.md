@@ -170,7 +170,11 @@ walk up the filesystem without restarting. The scan is cancellable with
 
 * Scans stay on the starting volume by default (`one-file-system = true`).
   The check is `st_dev`, so btrfs subvolumes and bind mounts count as
-  separate volumes too, which matches the mount table. `-X` crosses.
+  separate volumes too, which matches the mount table. `-X` crosses, and
+  `X` in the options popup toggles at runtime and rescans. The status bar
+  always shows the mode. `S` in the theme picker creates a *minimal*
+  config.toml (only the theme line) rather than a copy of the default
+  template, so today's defaults are never frozen into a user's file.
 * A mount point inside the scan is a directory node with the `OTHER_FS`
   flag and zero size; the row renders that volume's own `statvfs` usage in
   the `mount` style with a `volume <dev>` label where the bar would be, so

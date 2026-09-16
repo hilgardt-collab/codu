@@ -170,10 +170,12 @@ pub fn themes_dir() -> Option<PathBuf> {
 /// the commented default when it does not exist yet. Returns the path written.
 pub fn set_default_theme(id: &str) -> Result<PathBuf> {
     let path = default_config_path().context("no config directory on this platform")?;
+    // A new file holds only the theme line: copying the full default template
+    // would freeze today's defaults into the user's config.
     let existing = if path.is_file() {
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?
     } else {
-        DEFAULT_CONFIG_TOML.to_string()
+        "# cdu configuration. Run `cdu --dump-config` to see every option.\n".to_string()
     };
     let line = format!("theme = {}", toml_string(id));
     let mut replaced = false;
@@ -263,6 +265,29 @@ mod tests {
         assert_eq!(c.theme, "nord");
         assert_eq!(c.bar_width, 10);
         assert!(c.mouse);
+    }
+
+    #[test]
+    fn theme_line_replacement_keeps_other_keys_and_new_file_is_minimal() {
+        // Exercise the line rewriting on text, without touching the real config.
+        let existing = "# comment\ntheme = \"nord\"\nicons = \"ascii\"\n";
+        let out: Vec<String> = existing
+            .lines()
+            .map(|l| {
+                if l.split('=').next().is_some_and(|k| k.trim() == "theme") {
+                    format!("theme = {}", toml_string("mine"))
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect();
+        assert_eq!(out, ["# comment", "theme = \"mine\"", "icons = \"ascii\""]);
+        let parsed: Config = toml::from_str(&out.join("\n")).unwrap();
+        assert_eq!(parsed.theme, "mine");
+        assert!(
+            parsed.one_file_system,
+            "defaults still apply to keys the file omits"
+        );
     }
 
     #[test]

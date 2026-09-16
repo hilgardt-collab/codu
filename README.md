@@ -134,7 +134,12 @@ Scans do not cross into other mounted volumes: a mount point inside the
 scan is listed with the `>` flag and the 💾 icon, its size column shows how
 much of *that volume* is in use, and it contributes nothing to the parent's
 total. `i` on it shows the device, filesystem and capacity. Pass `-X` or set
-`one-file-system = false` to scan across mounts instead.
+`one-file-system = false` to scan across mounts instead, or flip it at
+runtime with `X` in the options popup (`o`), which rescans. The status bar
+shows which mode is active ("this volume" or "all volumes").
+
+If cdu ever seems to scan into other mounts, check `~/.config/cdu/config.toml`
+for a `one-file-system = false` line: a config file overrides the default.
 
 The volumes screen (`V`, `cdu --volumes`, or `..` from `/`) lists every
 volume the system knows about:
