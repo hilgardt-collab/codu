@@ -424,4 +424,9 @@ anatomy, the key map rationale and the architecture.
 
 ## License
 
-MIT
+Copyright © 2026 H.G.Raubenheimer (with Claude)
+
+codu is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. It comes with no warranty; see [LICENSE](LICENSE) for the full text.
