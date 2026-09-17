@@ -39,27 +39,15 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     // Header
     frame.buffer_mut().set_style(header, st.header);
-    let title = if app.icons.emoji() {
-        format!(" {} codu ", app.icons.app)
-    } else {
-        " codu ".to_string()
-    };
     frame.render_widget(
         Line::from(vec![
-            Span::styled(title, st.header_title),
+            Span::styled(super::header_title(app), st.header_title),
             Span::styled(" Volumes ", st.header_path),
         ]),
         header,
     );
-    let mood = match (app.icons.emoji(), app.theme.dark) {
-        (false, _) => "",
-        (true, Some(true)) => "🌙 ",
-        (true, Some(false)) => "🌞 ",
-        (true, None) => "🎨 ",
-    };
-    let theme_label = format!(" {mood}{} ", app.theme.name);
     frame.render_widget(
-        Line::from(Span::styled(theme_label, st.header_theme)).right_aligned(),
+        Line::from(Span::styled(super::theme_label(app), st.header_theme)).right_aligned(),
         header,
     );
 

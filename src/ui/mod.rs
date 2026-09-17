@@ -49,6 +49,26 @@ pub fn centered(area: Rect, width: u16, height: u16) -> Rect {
     )
 }
 
+/// The app name shown at the left of every screen's header.
+fn header_title(app: &App) -> String {
+    if app.icons.emoji() {
+        format!(" {} codu ", app.icons.app)
+    } else {
+        " codu ".to_string()
+    }
+}
+
+/// The theme name shown at the right of every screen's header.
+fn theme_label(app: &App) -> String {
+    let mood = match (app.icons.emoji(), app.theme.dark) {
+        (false, _) => "",
+        (true, Some(true)) => "🌙 ",
+        (true, Some(false)) => "🌞 ",
+        (true, None) => "🎨 ",
+    };
+    format!(" {mood}{} ", app.theme.name)
+}
+
 /// Dim everything currently drawn in `area` (used underneath popups).
 pub fn dim(buf: &mut Buffer, area: Rect) {
     buf.set_style(area, Style::new().add_modifier(Modifier::DIM));

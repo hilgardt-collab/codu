@@ -309,7 +309,7 @@ it immediately.
 | `b` `i` `u` `d` `r` `x` | toggle bold, italic, underline, dim, reversed, strike |
 | `Del`               | clear the element so it inherits from the base theme    |
 | `⏎`                 | edit the natural value of the row (name, dark, colours) |
-| `s`                 | save to `~/.config/codu/themes/<id>.toml`                |
+| `s`                 | save to `~/.config/codu/themes/<id>.toml`               |
 | `Esc`               | close (asks once if there are unsaved changes)          |
 
 #### Colour picker

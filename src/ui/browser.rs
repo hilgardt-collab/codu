@@ -40,18 +40,8 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let st = &app.theme.styles;
     frame.buffer_mut().set_style(area, st.header);
 
-    let title = if app.icons.emoji() {
-        format!(" {} codu ", app.icons.app)
-    } else {
-        " codu ".to_string()
-    };
-    let mood = match (app.icons.emoji(), app.theme.dark) {
-        (false, _) => "",
-        (true, Some(true)) => "🌙 ",
-        (true, Some(false)) => "🌞 ",
-        (true, None) => "🎨 ",
-    };
-    let theme_label = format!(" {mood}{} ", app.theme.name);
+    let title = super::header_title(app);
+    let theme_label = super::theme_label(app);
 
     let right_w = format::width(&theme_label) as u16;
     let title_w = format::width(&title) as u16;

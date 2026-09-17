@@ -6,9 +6,8 @@ use clap::{Parser, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "codu",
     version,
-    about = "Colourful, themeable, navigable disk usage TUI",
+    about,
     long_about = "codu scans a directory tree in parallel and lets you browse it in an \
 interactive terminal UI with ncdu-compatible keys, truecolor themes and emoji icons.\n\n\
 Configuration: $XDG_CONFIG_HOME/codu/config.toml (see --dump-config)\n\
