@@ -40,9 +40,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     // Header
     frame.buffer_mut().set_style(header, st.header);
     let title = if app.icons.emoji() {
-        format!(" {} cdu ", app.icons.app)
+        format!(" {} codu ", app.icons.app)
     } else {
-        " cdu ".to_string()
+        " codu ".to_string()
     };
     frame.render_widget(
         Line::from(vec![

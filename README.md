@@ -1,4 +1,4 @@
-# cdu
+# codu
 
 **Colourful disk usage.** An interactive, navigable disk-usage browser for
 modern terminals, written in Rust. Think `ncdu`, but with truecolor themes,
@@ -6,7 +6,7 @@ emoji file-type icons, a parallel scanner, and a config file that lets you
 restyle every part of the interface.
 
 ```
- 💽 cdu  /usr                                                         🌙 Catppuccin Mocha
+ 💽 codu  /usr                                                        🌙 Catppuccin Mocha
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
 │▸   📁 share                                    17.1 GiB ████████████████████████  45.9%│
 │    📚 lib                                      16.2 GiB ███████████████████████░  43.6%│
@@ -46,7 +46,7 @@ restyle every part of the interface.
   glyphs and gradient, and every icon can be changed.
 - **In-app theme editor**: copy any theme, edit every element's colours and
   attributes with live preview, save it to your themes directory, and set it
-  as the default, all without leaving cdu.
+  as the default, all without leaving codu.
 - **Group by type**: one keypress splits a listing into captioned sections
   (directories, images, video, archives, code, ...). An options popup lists
   every view toggle with its current state.
@@ -59,16 +59,15 @@ restyle every part of the interface.
 
 ## Install
 
-On Arch Linux, from the AUR (the package is `cdu-git`; the name `cdu` on the
-AUR is an unrelated du histogram tool):
+On Arch Linux, from the AUR (`codu-git` builds the latest commit):
 
 ```sh
-yay -S cdu-git        # or: paru -S cdu-git
+yay -S codu-git        # or: paru -S codu-git
 ```
 
 The package also installs the [cd-on-exit](#change-directory-on-exit) shell
 integration system-wide: fish picks it up automatically, bash and zsh login
-shells get it from `/etc/profile.d/cdu.sh`, and any other interactive shell
+shells get it from `/etc/profile.d/codu.sh`, and any other interactive shell
 needs the one-liner from that section.
 
 From source, with Rust 1.88 or newer:
@@ -83,7 +82,7 @@ to apparent sizes there.
 ## Usage
 
 ```
-cdu [OPTIONS] [PATH]
+codu [OPTIONS] [PATH]
 
   -c, --config <FILE>     alternative config file
   -T, --theme <NAME>      theme name or path to a .toml file
@@ -155,14 +154,14 @@ total. `i` on it shows the device, filesystem and capacity. Pass `-X` or set
 runtime with `X` in the options popup (`o`), which rescans. The status bar
 shows which mode is active ("this volume" or "all volumes").
 
-If cdu ever seems to scan into other mounts, check `~/.config/cdu/config.toml`
+If codu ever seems to scan into other mounts, check `~/.config/codu/config.toml`
 for a `one-file-system = false` line: a config file overrides the default.
 
-The volumes screen (`V`, `cdu --volumes`, or `..` from `/`) lists every
+The volumes screen (`V`, `codu --volumes`, or `..` from `/`) lists every
 volume the system knows about:
 
 ```
- 💽 cdu  Volumes                                                        Catppuccin Mocha
+ 💽 codu  Volumes                                                       Catppuccin Mocha
 ╭──────────────────────────────────────────────────────────────────────────────────────╮
 │▸   💾 /                        nvme1n1p1    btrfs      412 GiB ███░░░░░░░░░  1.8 TiB  22.6%  disk│
 │    💾 /home                    nvme1n1p1    btrfs      412 GiB ███░░░░░░░░░  1.8 TiB  22.6%  disk│
@@ -209,7 +208,7 @@ branches. Switching back with `Tab` drops you into the directory of whatever
 you had selected.
 
 ```
- 💽 cdu  /home/user/Documents                                     🌙 Catppuccin Mocha
+ 💽 codu  /home/user/Documents                                    🌙 Catppuccin Mocha
 ╭────────────────────────────────────────────────────────────────────────────────────╮
 │    📂 ..                                                                           │
 │    - 📂 /home/user/Documents               16.3 GiB ████████████████████████ 100.0%│
@@ -226,28 +225,28 @@ you had selected.
 
 ## Change directory on exit
 
-With the shell integration installed, quitting cdu leaves your shell in the
+With the shell integration installed, quitting codu leaves your shell in the
 directory you were looking at (the listed directory in list view, the
 selected entry's directory in tree view). Add one line to your shell config:
 
 ```sh
 # bash: ~/.bashrc          zsh: ~/.zshrc
-eval "$(cdu --shell bash)"      # or: eval "$(cdu --shell zsh)"
+eval "$(codu --shell bash)"      # or: eval "$(codu --shell zsh)"
 # fish: ~/.config/fish/config.fish
-cdu --shell fish | source
+codu --shell fish | source
 ```
 
-The function runs cdu with `--cwd-file` pointing at a temporary file and
-`cd`s into whatever cdu wrote there. The AUR package ships it as
-`/etc/profile.d/cdu.sh` (bash and zsh login shells) and as an autoloaded
+The function runs codu with `--cwd-file` pointing at a temporary file and
+`cd`s into whatever codu wrote there. The AUR package ships it as
+`/etc/profile.d/codu.sh` (bash and zsh login shells) and as an autoloaded
 fish function, so only non-login bash/zsh shells need the line above. Turn the behaviour off with
 `cd-on-exit = false` in the config, `W` in the options popup, or `--no-cd`
-for one run. Without the integration, cdu prints a one-line reminder when
+for one run. Without the integration, codu prints a one-line reminder when
 you quit from somewhere other than where you started.
 
 ## Configuration
 
-`cdu --dump-config > ~/.config/cdu/config.toml` writes a fully commented
+`codu --dump-config > ~/.config/codu/config.toml` writes a fully commented
 default config. Every key is optional:
 
 ```toml
@@ -273,13 +272,13 @@ one-file-system = true   # stay on the starting volume; -X to cross
 threads = 0
 confirm-delete = true
 read-only = false
-cd-on-exit = true        # with `eval "$(cdu --shell bash)"` installed
+cd-on-exit = true        # with `eval "$(codu --shell bash)"` installed
 date-format = "%Y-%m-%d %H:%M"
 ```
 
 ## Theming
 
-### Editing themes inside cdu
+### Editing themes inside codu
 
 Press `T` for the theme picker, move to any theme and press `n` to create
 a copy under a name you choose, or `e` to edit the selected theme directly.
@@ -310,7 +309,7 @@ it immediately.
 | `b` `i` `u` `d` `r` `x` | toggle bold, italic, underline, dim, reversed, strike |
 | `Del`               | clear the element so it inherits from the base theme    |
 | `⏎`                 | edit the natural value of the row (name, dark, colours) |
-| `s`                 | save to `~/.config/cdu/themes/<id>.toml`                |
+| `s`                 | save to `~/.config/codu/themes/<id>.toml`                |
 | `Esc`               | close (asks once if there are unsaved changes)          |
 
 #### Colour picker
@@ -353,13 +352,13 @@ which shadows the built-in from then on.
 
 ### Theme files by hand
 
-Themes are TOML files in `~/.config/cdu/themes/<name>.toml` (user themes
+Themes are TOML files in `~/.config/codu/themes/<name>.toml` (user themes
 shadow built-in ones with the same name). Start from a built-in:
 
 ```sh
-mkdir -p ~/.config/cdu/themes
-cdu --dump-theme nord > ~/.config/cdu/themes/mine.toml
-cdu --theme mine
+mkdir -p ~/.config/codu/themes
+codu --dump-theme nord > ~/.config/codu/themes/mine.toml
+codu --theme mine
 ```
 
 A theme has four sections. Anything you leave out is inherited from the
@@ -411,7 +410,7 @@ filter tree_guide tree_toggle group`.
 
 ### About emoji widths
 
-Terminals disagree about how many cells some emoji occupy. `cdu` sidesteps
+Terminals disagree about how many cells some emoji occupy. `codu` sidesteps
 this by only shipping icons whose Unicode East Asian Width is *Wide* and by
 normalising every icon to exactly two cells. If you add your own icons,
 prefer emoji that have an emoji presentation by default (📁 🦀 🎵 …) and avoid

@@ -172,7 +172,7 @@ pub mod tests {
         app.show_count = true;
         let screen = render(&mut app, 100, 16);
         println!("{screen}");
-        assert!(screen.contains("💽 cdu"));
+        assert!(screen.contains("💽 codu"));
         assert!(screen.contains("/home/user/Documents"));
         assert!(screen.contains("Catppuccin Mocha"));
         assert!(screen.contains("▸ "));
@@ -387,7 +387,7 @@ pub mod tests {
         // A tiny terminal still keeps a list row and the status line.
         app.config.key_guide = KeyGuide::Full;
         let tiny = render(&mut app, 60, 6);
-        assert!(tiny.contains("cdu") && tiny.lines().count() == 6, "{tiny}");
+        assert!(tiny.contains("codu") && tiny.lines().count() == 6, "{tiny}");
     }
 
     #[test]
@@ -511,7 +511,7 @@ pub mod tests {
         );
         let s = render(&mut app, 80, 20);
         // Either still scanning or already finished, both must render cleanly.
-        assert!(s.contains("Scanning") || s.contains("cdu"), "{s}");
+        assert!(s.contains("Scanning") || s.contains("codu"), "{s}");
         assert!(s.lines().all(|l| crate::format::width(l) <= 80));
     }
 }

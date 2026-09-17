@@ -156,9 +156,9 @@ impl Default for Config {
     }
 }
 
-/// `$XDG_CONFIG_HOME/cdu` (or the platform equivalent).
+/// `$XDG_CONFIG_HOME/codu` (or the platform equivalent).
 pub fn config_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("cdu"))
+    dirs::config_dir().map(|d| d.join("codu"))
 }
 
 pub fn default_config_path() -> Option<PathBuf> {
@@ -178,7 +178,7 @@ pub fn set_default_theme(id: &str) -> Result<PathBuf> {
     let existing = if path.is_file() {
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?
     } else {
-        "# cdu configuration. Run `cdu --dump-config` to see every option.\n".to_string()
+        "# codu configuration. Run `codu --dump-config` to see every option.\n".to_string()
     };
     let line = format!("theme = {}", toml_string(id));
     let mut replaced = false;

@@ -1,6 +1,6 @@
-# cdu — design notes
+# codu — design notes
 
-`cdu` ("colour disk usage") is an interactive, navigable disk-usage browser for
+`codu` ("colour disk usage") is an interactive, navigable disk-usage browser for
 modern colour terminals. It borrows the interaction model people already know
 from `ncdu`/`gdu`, adds a themeable truecolor look with emoji file-type icons,
 and is written in Rust on top of `ratatui` 0.30 + `crossterm` 0.29.
@@ -69,14 +69,14 @@ Design rules that follow from this:
  │        ⏳  Scanning /home/sakkie/Documents                              │
  │                                                                         │
  │        📄 84,233 items   💾 21.4 GiB   ⌛ 2.3s                          │
- │        📂 /home/sakkie/Documents/GitHub/cdu/target/debug/deps           │
+ │        📂 /home/sakkie/Documents/GitHub/codu/target/debug/deps          │
  │                                                                         │
  │                              q abort                                    │
  └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ```
- ┌ 💽 cdu ─ /home/sakkie/Documents ───────────────────────── 🌙 catppuccin ┐  header
+ ┌ 💽 codu ─ /home/sakkie/Documents ──────────────────────── 🌙 catppuccin ┐  header
  │    📂 ..                                                                │
  │  ▸ 📁 GitHub        12.4 GiB ████████████████░░░░░░░░ 61.2%   45,120   │  selected
  │    📦 archive.tar.gz 3.1 GiB ██████░░░░░░░░░░░░░░░░░░ 15.3%            │
@@ -154,7 +154,7 @@ percent/count columns drop, so the tool stays usable in a split pane.
 | `Esc` / `Ctrl-C`         | quit; `Esc` first closes popups and clears a filter |
 | mouse                    | click select, double-click open/toggle, wheel scroll|
 
-Notes: ncdu uses `g` for the graph toggle; `cdu` uses `b` because `g`/`G`
+Notes: ncdu uses `g` for the graph toggle; `codu` uses `b` because `g`/`G`
 are reserved for vim-style jump-to-top/bottom. `q` is deliberately unbound
 so a stray keypress never exits; `Esc` is the exit key.
 
@@ -193,10 +193,10 @@ walk up the filesystem without restarting. The scan is cancellable with
 
 ### Change directory on exit
 
-A process cannot change its parent shell's directory, so cdu follows the
+A process cannot change its parent shell's directory, so codu follows the
 yazi/ranger pattern: `--cwd-file FILE` makes it write the shown directory
 (list view: the listed directory; tree view: the selected entry's directory;
-volumes screen: the scanned root) on exit, and `cdu --shell bash|zsh|fish`
+volumes screen: the scanned root) on exit, and `codu --shell bash|zsh|fish`
 prints a wrapper function that runs the binary with a temp file and `cd`s
 into the result. `cd-on-exit` (config, `W` in options, `--no-cd`) gates
 both the write and the reminder that is printed when the user quits from a
@@ -230,9 +230,9 @@ different directory than they started in without the wrapper installed.
 
 ## 3. Theming
 
-Configuration lives in `$XDG_CONFIG_HOME/cdu/config.toml`; themes in
-`$XDG_CONFIG_HOME/cdu/themes/<name>.toml`. Built-in themes are embedded and can
-be dumped with `cdu --dump-theme <name>` as a starting point.
+Configuration lives in `$XDG_CONFIG_HOME/codu/config.toml`; themes in
+`$XDG_CONFIG_HOME/codu/themes/<name>.toml`. Built-in themes are embedded and can
+be dumped with `codu --dump-theme <name>` as a starting point.
 
 Built-in: `catppuccin-mocha` (default), `catppuccin-latte`, `dracula`,
 `gruvbox-dark`, `nord`, `tokyo-night`, `solarized-light`, `ansi`
@@ -317,7 +317,7 @@ names are accepted, and palette names are stored literally so the saved
 file stays readable). Text prompts start empty with the current value as a hint;
 `none` clears a field, and a key whose fields are all cleared is removed so
 it inherits from the `ansi` base again. Saving writes
-`$XDG_CONFIG_HOME/cdu/themes/<id>.toml`; `S` in the picker rewrites the
+`$XDG_CONFIG_HOME/codu/themes/<id>.toml`; `S` in the picker rewrites the
 `theme =` line of `config.toml` (creating the file from the commented
 default when missing).
 

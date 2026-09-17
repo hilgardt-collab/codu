@@ -1,4 +1,4 @@
-# cdu theme: ANSI
+# codu theme: ANSI
 # Uses only the terminal's own 16-colour palette, so it follows whatever
 # colour scheme your terminal already has. Every other theme inherits any
 # key it does not define from this file.

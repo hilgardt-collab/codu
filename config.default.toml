@@ -1,11 +1,11 @@
-# cdu configuration
-# Location: $XDG_CONFIG_HOME/cdu/config.toml  (usually ~/.config/cdu/config.toml)
+# codu configuration
+# Location: $XDG_CONFIG_HOME/codu/config.toml  (usually ~/.config/codu/config.toml)
 # Every key is optional; the values below are the defaults.
 
 # Theme name. Built-in: catppuccin-mocha, catppuccin-latte, dracula,
 # gruvbox-dark, nord, tokyo-night, solarized-light, ansi.
-# User themes live in $XDG_CONFIG_HOME/cdu/themes/<name>.toml.
-# Press T inside cdu to preview themes; `cdu --dump-theme NAME` prints one.
+# User themes live in $XDG_CONFIG_HOME/codu/themes/<name>.toml.
+# Press T inside codu to preview themes; `codu --dump-theme NAME` prints one.
 theme = "catppuccin-mocha"
 
 # Icon column: "emoji", "ascii", or "none".
@@ -72,7 +72,7 @@ confirm-delete = true
 read-only = false
 
 # When quitting, make the shell change into the directory that was shown.
-# Needs the shell integration: add  eval "$(cdu --shell bash)"  (or zsh /
+# Needs the shell integration: add  eval "$(codu --shell bash)"  (or zsh /
 # fish) to your shell config. Toggle at runtime with W in the options popup.
 cd-on-exit = true
 

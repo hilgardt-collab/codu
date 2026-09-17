@@ -508,7 +508,7 @@ fn options(frame: &mut Frame, app: &App) {
         (
             "W",
             check(app.config.cd_on_exit).into(),
-            "change the shell's directory to the shown one on exit (needs `cdu --shell`)".into(),
+            "change the shell's directory to the shown one on exit (needs `codu --shell`)".into(),
         ),
     ];
     let mut lines: Vec<Line> = vec![Line::default()];

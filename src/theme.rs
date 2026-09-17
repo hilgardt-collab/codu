@@ -547,7 +547,7 @@ pub fn save_user_theme(id: &str, doc: &ThemeDoc) -> Result<PathBuf> {
     let dir = crate::config::themes_dir().context("no config directory on this platform")?;
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let path = dir.join(format!("{id}.toml"));
-    let text = format!("# cdu theme (edited in cdu)\n{}", doc.to_toml());
+    let text = format!("# codu theme (edited in codu)\n{}", doc.to_toml());
     std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
     Ok(path)
 }

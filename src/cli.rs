@@ -6,13 +6,13 @@ use clap::{Parser, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "cdu",
+    name = "codu",
     version,
     about = "Colourful, themeable, navigable disk usage TUI",
-    long_about = "cdu scans a directory tree in parallel and lets you browse it in an \
+    long_about = "codu scans a directory tree in parallel and lets you browse it in an \
 interactive terminal UI with ncdu-compatible keys, truecolor themes and emoji icons.\n\n\
-Configuration: $XDG_CONFIG_HOME/cdu/config.toml (see --dump-config)\n\
-Themes:        $XDG_CONFIG_HOME/cdu/themes/<name>.toml (see --list-themes, --dump-theme)"
+Configuration: $XDG_CONFIG_HOME/codu/config.toml (see --dump-config)\n\
+Themes:        $XDG_CONFIG_HOME/codu/themes/<name>.toml (see --list-themes, --dump-theme)"
 )]
 pub struct Cli {
     /// Directory to scan (defaults to the current directory)
@@ -87,7 +87,7 @@ pub struct Cli {
     #[arg(long, value_name = "FILE")]
     pub cwd_file: Option<std::path::PathBuf>,
 
-    /// Print a shell function that makes `cdu` change into the shown directory on exit
+    /// Print a shell function that makes `codu` change into the shown directory on exit
     #[arg(long, value_enum, value_name = "SHELL")]
     pub shell: Option<ShellArg>,
 

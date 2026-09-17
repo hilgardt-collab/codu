@@ -41,9 +41,9 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     frame.buffer_mut().set_style(area, st.header);
 
     let title = if app.icons.emoji() {
-        format!(" {} cdu ", app.icons.app)
+        format!(" {} codu ", app.icons.app)
     } else {
-        " cdu ".to_string()
+        " codu ".to_string()
     };
     let mood = match (app.icons.emoji(), app.theme.dark) {
         (false, _) => "",

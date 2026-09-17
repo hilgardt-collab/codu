@@ -1,11 +1,11 @@
 [package]
-name = "cdu"
+name = "codu"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Colourful, themeable, navigable disk usage TUI"
 license = "MIT"
-repository = "https://github.com/hilgardt-collab/cdu"
+repository = "https://github.com/hilgardt-collab/codu"
 keywords = ["disk", "usage", "tui", "ncdu", "terminal"]
 categories = ["command-line-utilities", "filesystem"]
 

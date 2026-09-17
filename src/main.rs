@@ -1,4 +1,4 @@
-//! cdu — colourful, themeable, navigable disk usage TUI.
+//! codu — colourful, themeable, navigable disk usage TUI.
 
 mod app;
 mod cli;
@@ -108,7 +108,7 @@ fn main() -> Result<()> {
     result
 }
 
-/// Write to stdout, ignoring a closed pipe (`cdu --shell bash | head`).
+/// Write to stdout, ignoring a closed pipe (`codu --shell bash | head`).
 fn emit(text: &str) {
     let mut out = io::stdout().lock();
     let _ = out.write_all(text.as_bytes());
@@ -124,7 +124,7 @@ fn cd_on_exit(app: &App, cwd_file: Option<&std::path::Path>, start_dir: &std::pa
     match cwd_file {
         Some(file) => {
             if let Err(e) = std::fs::write(file, dir.as_os_str().as_encoded_bytes()) {
-                eprintln!("cdu: could not write {}: {e}", file.display());
+                eprintln!("codu: could not write {}: {e}", file.display());
             }
         }
         None => {
@@ -134,24 +134,24 @@ fn cd_on_exit(app: &App, cwd_file: Option<&std::path::Path>, start_dir: &std::pa
                     .and_then(|s| s.rsplit('/').next().map(str::to_string))
                     .filter(|s| matches!(s.as_str(), "bash" | "zsh" | "fish"))
                     .unwrap_or_else(|| "bash".to_string());
-                eprintln!("cdu: you were in {}", dir.display());
+                eprintln!("codu: you were in {}", dir.display());
                 eprintln!(
-                    "cdu: to land there on exit, add to your shell config:  eval \"$(cdu --shell {shell})\"   (or set cd-on-exit = false)"
+                    "codu: to land there on exit, add to your shell config:  eval \"$(codu --shell {shell})\"   (or set cd-on-exit = false)"
                 );
             }
         }
     }
 }
 
-/// Shell function that runs cdu with a temp cwd file and cds into the result.
+/// Shell function that runs codu with a temp cwd file and cds into the result.
 fn shell_integration(shell: cli::ShellArg) -> String {
     match shell {
         cli::ShellArg::Bash | cli::ShellArg::Zsh => {
-            r#"# cdu shell integration: run `eval "$(cdu --shell bash)"` from your rc file.
-cdu() {
+            r#"# codu shell integration: run `eval "$(codu --shell bash)"` from your rc file.
+codu() {
     local tmp cwd rc
-    tmp="$(mktemp -t cdu-cwd.XXXXXX)" || return
-    command cdu "$@" --cwd-file="$tmp"
+    tmp="$(mktemp -t codu-cwd.XXXXXX)" || return
+    command codu "$@" --cwd-file="$tmp"
     rc=$?
     cwd="$(cat -- "$tmp" 2>/dev/null)"
     rm -f -- "$tmp"
@@ -164,10 +164,10 @@ cdu() {
             .to_string()
         }
         cli::ShellArg::Fish => {
-            r#"# cdu shell integration: run `cdu --shell fish | source` from config.fish.
-function cdu --wraps cdu --description 'cdu, changing directory on exit'
-    set -l tmp (mktemp -t cdu-cwd.XXXXXX); or return
-    command cdu $argv --cwd-file="$tmp"
+            r#"# codu shell integration: run `codu --shell fish | source` from config.fish.
+function codu --wraps codu --description 'codu, changing directory on exit'
+    set -l tmp (mktemp -t codu-cwd.XXXXXX); or return
+    command codu $argv --cwd-file="$tmp"
     set -l rc $status
     set -l cwd (cat -- "$tmp" 2>/dev/null)
     rm -f -- "$tmp"
