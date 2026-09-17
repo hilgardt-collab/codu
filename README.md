@@ -59,12 +59,26 @@ restyle every part of the interface.
 
 ## Install
 
+On Arch Linux, from the AUR (the package is `cdu-git`; the name `cdu` on the
+AUR is an unrelated du histogram tool):
+
+```sh
+yay -S cdu-git        # or: paru -S cdu-git
+```
+
+The package also installs the [cd-on-exit](#change-directory-on-exit) shell
+integration system-wide: fish picks it up automatically, bash and zsh login
+shells get it from `/etc/profile.d/cdu.sh`, and any other interactive shell
+needs the one-liner from that section.
+
+From source, with Rust 1.88 or newer:
+
 ```sh
 cargo install --path .
 ```
 
-Requires Rust 1.88 or newer. Runs on Linux and macOS; it compiles on Windows
-but disk-usage sizes fall back to apparent sizes there.
+Runs on Linux and macOS; it compiles on Windows but disk-usage sizes fall back
+to apparent sizes there.
 
 ## Usage
 
@@ -224,7 +238,9 @@ cdu --shell fish | source
 ```
 
 The function runs cdu with `--cwd-file` pointing at a temporary file and
-`cd`s into whatever cdu wrote there. Turn the behaviour off with
+`cd`s into whatever cdu wrote there. The AUR package ships it as
+`/etc/profile.d/cdu.sh` (bash and zsh login shells) and as an autoloaded
+fish function, so only non-login bash/zsh shells need the line above. Turn the behaviour off with
 `cd-on-exit = false` in the config, `W` in the options popup, or `--no-cd`
 for one run. Without the integration, cdu prints a one-line reminder when
 you quit from somewhere other than where you started.
