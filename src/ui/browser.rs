@@ -260,8 +260,9 @@ fn draw_tree_rows(frame: &mut Frame, inner: Rect, app: &App, cols: &Cols) {
     let buf = frame.buffer_mut();
     let end = (app.scroll + inner.height as usize).min(app.tree_rows.len());
     for (i, row) in app.tree_rows[app.scroll..end].iter().enumerate() {
+        let idx = app.scroll + i;
         let rect = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-        let selected = app.scroll + i == app.cursor;
+        let selected = idx == app.cursor;
         let sel = if selected { st.selected } else { Style::new() };
         if selected {
             buf.set_style(rect, st.selected);
@@ -276,11 +277,12 @@ fn draw_tree_rows(frame: &mut Frame, inner: Rect, app: &App, cols: &Cols) {
         if row.parent {
             push_parent(&mut spans, app, cols, cols.name as usize, p);
         } else {
-            let node = node_at(tree, &row.path);
-            let prefix = tree_prefix(row, node, cols.name as usize);
+            let path = app.tree_row_path(idx);
+            let node = node_at(tree, &path);
+            let prefix = tree_prefix(row, &app.tree_guides(idx), node, cols.name as usize);
             let name_w = (cols.name as usize).saturating_sub(format::width(&prefix));
             push_entry_head(&mut spans, app, node, cols, &prefix, name_w, p);
-            if row.path.is_empty() {
+            if path.is_empty() {
                 // The root row shows the full scanned path instead of its name.
                 if let Some(last) = spans.last_mut() {
                     let label = app.root_path.display().to_string();
@@ -294,7 +296,7 @@ fn draw_tree_rows(frame: &mut Frame, inner: Rect, app: &App, cols: &Cols) {
                 0.0
             };
             let mount = if node.has(flags::OTHER_FS) {
-                app.volume_for(&app.fs_path(&row.path))
+                app.volume_for(&app.fs_path(&path))
             } else {
                 None
             };
@@ -305,17 +307,19 @@ fn draw_tree_rows(frame: &mut Frame, inner: Rect, app: &App, cols: &Cols) {
 }
 
 /// Guide lines and the +/- toggle in front of a tree row's icon.
-fn tree_prefix(row: &TreeRow, node: &Node, name_area: usize) -> String {
+/// `ancestors_last` holds one flag per ancestor between the root and this
+/// node's parent (see [`App::tree_guides`]).
+fn tree_prefix(row: &TreeRow, ancestors_last: &[bool], node: &Node, name_area: usize) -> String {
     let toggle = if node.is_dir() {
         if node.expanded { "- " } else { "+ " }
     } else {
         "  "
     };
-    if row.path.is_empty() {
+    if row.depth == 0 {
         return toggle.to_string();
     }
     let mut guides = String::new();
-    for &last in &row.guides {
+    for &last in ancestors_last {
         guides.push_str(if last { "   " } else { "│  " });
     }
     guides.push_str(if row.is_last { "└─" } else { "├─" });

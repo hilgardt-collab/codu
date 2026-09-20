@@ -91,6 +91,7 @@ pub mod tests {
     fn leaf(name: &str, size: u64, kind: Kind, fl: u8) -> Node {
         Node {
             name: name.into(),
+            raw: None,
             kind,
             size,
             apparent: size,
@@ -107,6 +108,7 @@ pub mod tests {
         let items = children.iter().map(|c| 1 + c.items).sum();
         Node {
             name: name.into(),
+            raw: None,
             kind: Kind::Dir,
             size,
             apparent: size,
@@ -154,8 +156,9 @@ pub mod tests {
             ScanOptions::default(),
             false,
         );
-        // Discard the real background scan and install the fixture.
+        // Discard the real background scan and volume lookup; install the fixture.
         app.scan = None;
+        app.volumes_job = None;
         app.tree = Some(tree);
         app.tree.as_mut().unwrap().expanded = true;
         app.rebuild_rows(None);
@@ -463,6 +466,7 @@ pub mod tests {
             },
         ];
         view.cursor = 0;
+        view.loading = false;
         let s = render(&mut app, 110, 14);
         println!("{s}");
         assert!(s.contains("Volumes"));

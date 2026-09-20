@@ -55,6 +55,8 @@ restyle every part of the interface.
 - Disk usage or apparent size, binary or SI units, hard-link deduplication,
   exclude globs, single-filesystem mode, hidden-file toggle, filtering.
 - Delete or move to trash with confirmation, `--read-only` to disable both.
+  Mount points, excluded entries and unreadable directories are never
+  deleted: their contents were not scanned, so nothing is deleted unseen.
 - Rescan any directory in place.
 
 ## Install
@@ -152,13 +154,16 @@ much of *that volume* is in use, and it contributes nothing to the parent's
 total. `i` on it shows the device, filesystem and capacity. Pass `-X` or set
 `one-file-system = false` to scan across mounts instead, or flip it at
 runtime with `X` in the options popup (`o`), which rescans. The status bar
-shows which mode is active ("this volume" or "all volumes").
+shows which mode is active ("this volume" or "all volumes"). `d` and `D`
+refuse to act on a mount point, so a mounted volume can never be wiped from
+inside another scan.
 
 If codu ever seems to scan into other mounts, check `~/.config/codu/config.toml`
 for a `one-file-system = false` line: a config file overrides the default.
 
 The volumes screen (`V`, `codu --volumes`, or `..` from `/`) lists every
-volume the system knows about:
+volume the system knows about. Discovery runs on a background thread, so a
+network mount that has stopped responding delays the list, not codu:
 
 ```
  💽 codu  Volumes                                                       Catppuccin Mocha
@@ -275,6 +280,10 @@ read-only = false
 cd-on-exit = true        # with `eval "$(codu --shell bash)"` installed
 date-format = "%Y-%m-%d %H:%M"
 ```
+
+A misspelt key (say `readonly`) is reported in a popup at startup rather
+than silently ignored, and an invalid `date-format` falls back to the
+default with the same warning.
 
 ## Theming
 

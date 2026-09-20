@@ -56,6 +56,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         return;
     };
     let n = view.list.len();
+    let loading = view.loading;
     let inner = if app.config.borders {
         let position = if n == 0 {
             String::new()
@@ -79,7 +80,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     view.ensure_visible(inner.height as usize);
 
     if n == 0 {
-        let msg = if crate::volumes::supported() {
+        let msg = if loading {
+            "loading volumes…"
+        } else if crate::volumes::supported() {
             "no volumes found"
         } else {
             "volume listing is not available on this platform"
@@ -225,6 +228,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Span::styled(format::count(mounted as u64), st.status_accent),
         Span::styled(" mounted  ·  ⏎ scans a mounted volume", st.status),
     ];
+    if loading {
+        spans.push(Span::styled("  ·  refreshing…", st.status));
+    }
     if app.tree.is_none() {
         spans.push(Span::styled("  ·  Esc quits", st.status));
     }

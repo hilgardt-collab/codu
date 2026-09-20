@@ -562,6 +562,7 @@ mod tests {
     fn node(name: &str, kind: Kind, flags: u8) -> Node {
         Node {
             name: name.into(),
+            raw: None,
             kind,
             size: 0,
             apparent: 0,

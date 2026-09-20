@@ -79,11 +79,28 @@ pub fn duration(d: Duration) -> String {
 }
 
 /// Format a unix timestamp (seconds) using a chrono format string in local time.
+/// An invalid format string yields `?` rather than a panic (chrono reports
+/// bad specifiers through `Display`, which `to_string` would turn into one).
 pub fn mtime(secs: i64, fmt: &str) -> String {
     use chrono::{Local, TimeZone};
-    match Local.timestamp_opt(secs, 0).single() {
-        Some(t) => t.format(fmt).to_string(),
-        None => "-".to_string(),
+    use std::fmt::Write;
+    let Some(t) = Local.timestamp_opt(secs, 0).single() else {
+        return "-".to_string();
+    };
+    let mut out = String::new();
+    match write!(out, "{}", t.format(fmt)) {
+        Ok(()) => out,
+        Err(_) => "?".to_string(),
+    }
+}
+
+/// Validate a strftime-style format string before it is used on every frame.
+pub fn check_date_format(fmt: &str) -> Result<(), String> {
+    use chrono::format::{Item, StrftimeItems};
+    if StrftimeItems::new(fmt).any(|item| item == Item::Error) {
+        Err("contains an invalid % specifier".to_string())
+    } else {
+        Ok(())
     }
 }
 
@@ -182,6 +199,15 @@ mod tests {
         assert_eq!(percent(0.612), "61.2%");
         assert_eq!(percent(f64::NAN), "0.0%");
         assert_eq!(percent(2.0), "100.0%");
+    }
+
+    #[test]
+    fn bad_date_formats_do_not_panic() {
+        assert_eq!(mtime(0, "%Q"), "?");
+        assert_eq!(mtime(0, "%Y").len(), 4);
+        assert!(check_date_format("%Y-%m-%d %H:%M").is_ok());
+        assert!(check_date_format("%Q").is_err());
+        assert!(check_date_format("%").is_err());
     }
 
     #[test]

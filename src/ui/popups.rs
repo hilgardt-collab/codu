@@ -223,6 +223,10 @@ fn info(frame: &mut Frame, app: &App) {
             format!("{} of {}", format::percent(share), parent_label),
         ),
     ];
+    if node.raw.is_some() {
+        // The name could not be shown as-is; show what is really on disk.
+        rows.insert(1, ("On disk", format!("{:?}", node.file_name())));
+    }
     if node.has(crate::scan::flags::OTHER_FS) {
         match app.volume_for(&path) {
             Some(v) => {

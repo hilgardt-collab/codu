@@ -46,10 +46,16 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut config = Config::load(cli.config.as_deref())?;
+    let (mut config, mut warnings) = Config::load(cli.config.as_deref())?;
     apply_cli_overrides(&mut config, &cli);
+    if let Err(e) = format::check_date_format(&config.date_format) {
+        warnings.push(format!(
+            "date-format `{}` {e}; using the default",
+            config.date_format
+        ));
+        config.date_format = Config::default().date_format;
+    }
 
-    let mut warnings: Vec<String> = Vec::new();
     let theme = match Theme::load(&config.theme) {
         Ok(t) => t,
         Err(e) => {
@@ -84,7 +90,9 @@ fn main() -> Result<()> {
     let start_dir = std::env::current_dir().unwrap_or_else(|_| root.clone());
     let mut app = App::new(config, theme, icons, root, scan_options, cli.volumes);
     if !warnings.is_empty() {
-        app.set_status(warnings.join(" | "), true);
+        // A status line would be overwritten by "scanned N items" moments
+        // later; a popup stays until dismissed.
+        app.show_startup_warnings(&warnings);
     }
 
     let mut terminal = ratatui::init();
@@ -134,7 +142,12 @@ fn cd_on_exit(app: &App, cwd_file: Option<&std::path::Path>, start_dir: &std::pa
                     .and_then(|s| s.rsplit('/').next().map(str::to_string))
                     .filter(|s| matches!(s.as_str(), "bash" | "zsh" | "fish"))
                     .unwrap_or_else(|| "bash".to_string());
-                eprintln!("codu: you were in {}", dir.display());
+                // A directory name could carry terminal escape sequences;
+                // the UI strips them and so does this hint.
+                eprintln!(
+                    "codu: you were in {}",
+                    scan::sanitize(&dir.to_string_lossy())
+                );
                 eprintln!(
                     "codu: to land there on exit, add to your shell config:  eval \"$(codu --shell {shell})\"   (or set cd-on-exit = false)"
                 );
@@ -151,7 +164,7 @@ fn shell_integration(shell: cli::ShellArg) -> String {
 codu() {
     local tmp cwd rc
     tmp="$(mktemp -t codu-cwd.XXXXXX)" || return
-    command codu "$@" --cwd-file="$tmp"
+    command codu --cwd-file="$tmp" "$@"
     rc=$?
     cwd="$(cat -- "$tmp" 2>/dev/null)"
     rm -f -- "$tmp"
@@ -167,7 +180,7 @@ codu() {
             r#"# codu shell integration: run `codu --shell fish | source` from config.fish.
 function codu --wraps codu --description 'codu, changing directory on exit'
     set -l tmp (mktemp -t codu-cwd.XXXXXX); or return
-    command codu $argv --cwd-file="$tmp"
+    command codu --cwd-file="$tmp" $argv
     set -l rc $status
     set -l cwd (cat -- "$tmp" 2>/dev/null)
     rm -f -- "$tmp"
@@ -188,10 +201,12 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         if app.should_quit {
             return Ok(());
         }
-        let timeout = if app.is_scanning() || app.status.is_some() {
+        // Only a running scan, a background volume lookup or a status message
+        // that has to expire needs a timer; otherwise sleep until input arrives.
+        let timeout = if app.is_scanning() || app.volumes_loading() || app.status.is_some() {
             Duration::from_millis(50)
         } else {
-            Duration::from_millis(250)
+            Duration::from_secs(1)
         };
         if event::poll(timeout)? {
             handle(app, event::read()?);
@@ -262,13 +277,9 @@ fn build_globset(patterns: &[String]) -> Result<Option<globset::GlobSet>> {
 }
 
 /// Strip a trailing separator so `file_name()` works on the root, but keep `/`.
+/// Rebuilding from components keeps a non-UTF-8 path intact.
 fn normalize_trailing(p: PathBuf) -> PathBuf {
-    let s = p.to_string_lossy();
-    if s.len() > 1 && s.ends_with(std::path::MAIN_SEPARATOR) {
-        PathBuf::from(s.trim_end_matches(std::path::MAIN_SEPARATOR))
-    } else {
-        p
-    }
+    p.components().collect()
 }
 
 fn dump_theme(name: &str) -> Result<()> {
@@ -299,4 +310,45 @@ fn list_themes() -> Result<()> {
         writeln!(out, "\nUser themes directory: {}", dir.display())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trailing_separator_is_stripped_but_root_is_kept() {
+        assert_eq!(
+            normalize_trailing(PathBuf::from("/a/b/")),
+            PathBuf::from("/a/b")
+        );
+        assert_eq!(
+            normalize_trailing(PathBuf::from("/a/b")),
+            PathBuf::from("/a/b")
+        );
+        assert_eq!(normalize_trailing(PathBuf::from("/")), PathBuf::from("/"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_root_survives_normalisation() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let p = PathBuf::from(OsStr::from_bytes(b"/tmp/bad\xff/"));
+        assert_eq!(
+            normalize_trailing(p).as_os_str().as_bytes(),
+            b"/tmp/bad\xff"
+        );
+    }
+
+    #[test]
+    fn shell_wrappers_pass_cwd_file_before_user_arguments() {
+        for shell in [cli::ShellArg::Bash, cli::ShellArg::Fish] {
+            let text = shell_integration(shell);
+            let line = text.lines().find(|l| l.contains("command codu")).unwrap();
+            let cwd = line.find("--cwd-file").unwrap();
+            let args = line.find("$@").or_else(|| line.find("$argv")).unwrap();
+            assert!(cwd < args, "{line}");
+        }
+    }
 }

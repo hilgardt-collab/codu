@@ -1,7 +1,9 @@
 //! Application state and input handling.
 
+use std::cmp::Ordering;
+use std::ffi::{OsStr, OsString};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -39,23 +41,30 @@ pub struct GroupInfo {
     pub count: usize,
 }
 
-/// One row of the tree view.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// One row of the tree view. A row is a few links rather than a copy of its
+/// index path, so a fully expanded tree of a million entries costs some
+/// megabytes instead of hundreds; paths and guide lines are reconstructed on
+/// demand by walking `parent_row` (see [`App::tree_row_path`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TreeRow {
-    /// Child indices from the root; empty for the root row.
-    pub path: Vec<usize>,
-    /// One entry per ancestor level between the root and this node's parent:
-    /// `true` when that ancestor was the last of its siblings (no guide line).
-    pub guides: Vec<bool>,
+    /// Index of this node in its parent's `children` (0 for the root row).
+    pub child: u32,
+    /// Row index of the parent row; [`NO_ROW`] for the root row and `..`.
+    pub parent_row: u32,
+    /// Number of ancestors below the root; 0 for the root row.
+    pub depth: u16,
     /// Whether this node is the last of its siblings.
     pub is_last: bool,
     /// The `..` row above the root.
     pub parent: bool,
 }
 
+/// `parent_row` of rows that have no parent row.
+pub const NO_ROW: u32 = u32::MAX;
+
 impl TreeRow {
     pub fn depth(&self) -> usize {
-        self.path.len()
+        self.depth as usize
     }
 }
 
@@ -102,7 +111,7 @@ pub struct ScanJob {
     /// Set when walking up: the scanned path becomes the new root.
     pub new_root: Option<PathBuf>,
     /// Entry to select once the scan lands (used when walking up).
-    pub select: Option<String>,
+    pub select: Option<OsString>,
 }
 
 /// A transient message for the status bar.
@@ -117,16 +126,19 @@ pub struct VolumesView {
     pub list: Vec<Volume>,
     pub cursor: usize,
     pub scroll: usize,
+    /// A (re)load is running on a background thread; `list` is the last
+    /// known state meanwhile.
+    pub loading: bool,
 }
 
 impl VolumesView {
-    pub fn load() -> VolumesView {
-        let list = volumes::list();
+    fn new(list: Vec<Volume>, loading: bool) -> VolumesView {
         let cursor = list.iter().position(|v| v.mounted()).unwrap_or(0);
         VolumesView {
             list,
             cursor,
             scroll: 0,
+            loading,
         }
     }
 
@@ -146,6 +158,17 @@ impl VolumesView {
         }
         self.scroll = self.scroll.min(self.list.len().saturating_sub(height));
     }
+}
+
+/// Volume discovery running on a background thread. It calls `statvfs` on
+/// every mount, and a hung network mount would otherwise freeze the UI (or
+/// startup) for as long as the kernel waits.
+pub struct VolumesJob {
+    rx: Receiver<Vec<Volume>>,
+    /// Device to keep selected on the volumes screen once the list lands.
+    keep: Option<String>,
+    /// Report completion in the status bar (an explicit refresh).
+    announce: bool,
 }
 
 /// Sorting/filtering parameters shared by both views.
@@ -173,6 +196,9 @@ pub struct App {
     pub volumes: Option<VolumesView>,
     /// Mounted volumes, for annotating mount points inside a scan.
     pub mounts: Vec<Volume>,
+    /// Every volume from the last completed discovery.
+    pub all_volumes: Vec<Volume>,
+    pub volumes_job: Option<VolumesJob>,
     pub view: View,
     /// List view: child indices from the root down to the current directory.
     pub path: Vec<usize>,
@@ -230,7 +256,9 @@ impl App {
         let mut app = App {
             view: config.view,
             volumes: None,
-            mounts: volumes::mounted(),
+            mounts: Vec::new(),
+            all_volumes: Vec::new(),
+            volumes_job: None,
             sort: config.sort,
             sort_reverse: config.sort_reverse,
             dirs_first: config.dirs_first,
@@ -271,6 +299,9 @@ impl App {
         if start_in_volumes {
             app.open_volumes();
         } else {
+            // Mount points inside the scan get their volume's usage once
+            // discovery finishes; neither the scan nor the UI waits for it.
+            app.load_volumes(None, false);
             let root = app.root_path.clone();
             app.start_scan(root, Vec::new(), None, None);
         }
@@ -285,7 +316,7 @@ impl App {
         path: PathBuf,
         target: Vec<usize>,
         new_root: Option<PathBuf>,
-        select: Option<String>,
+        select: Option<OsString>,
     ) {
         let progress = Arc::new(Progress::default());
         let (tx, rx) = mpsc::channel();
@@ -309,6 +340,11 @@ impl App {
 
     pub fn is_scanning(&self) -> bool {
         self.scan.is_some()
+    }
+
+    /// Volume discovery is still running in the background.
+    pub fn volumes_loading(&self) -> bool {
+        self.volumes_job.is_some()
     }
 
     fn cancel_scan(&mut self) {
@@ -391,12 +427,32 @@ impl App {
     /// Replace the subtree at `target` with `node` and fix ancestor totals.
     fn splice(&mut self, target: Vec<usize>, mut node: Node) {
         let selected = self.selected_path();
-        let selected_name = self.selected_node().map(|n| n.name.to_string());
+        let selected_name = self.selected_node().map(|n| n.file_name().to_os_string());
+        // The list view may be showing a directory inside the replaced
+        // subtree. Its indices mean nothing in the fresh tree, so remember it
+        // by name and find it again afterwards (or the deepest surviving
+        // ancestor).
+        let inside: Option<Vec<OsString>> = match &self.tree {
+            Some(tree) if self.path.len() > target.len() && self.path.starts_with(&target) => {
+                let mut n = node_at(tree, &target);
+                Some(
+                    self.path[target.len()..]
+                        .iter()
+                        .map(|&i| {
+                            n = &n.children[i];
+                            n.file_name().to_os_string()
+                        })
+                        .collect(),
+                )
+            }
+            _ => None,
+        };
         let Some(tree) = self.tree.as_mut() else {
             return;
         };
         let old = node_at_mut(tree, &target);
         node.name = old.name.clone();
+        node.raw = old.raw.clone();
         node.expanded = old.expanded;
         let d_size = node.size as i128 - old.size as i128;
         let d_apparent = node.apparent as i128 - old.apparent as i128;
@@ -405,11 +461,19 @@ impl App {
         if let Some((_, ancestors)) = target.split_last() {
             adjust_ancestors(tree, ancestors, d_size, d_apparent, d_items);
         }
+        let mut relocated = false;
+        if let Some(names) = inside {
+            let path = resolve_by_names(tree, &target, &names);
+            relocated = path.len() < self.path.len();
+            self.path = path;
+        }
         match self.view {
             View::List => {
                 self.rebuild_rows(None);
-                if let Some(name) = selected_name {
-                    self.select_child_by_name(&name);
+                match selected_name {
+                    Some(name) if !relocated => self.select_child_by_name(&name),
+                    Some(_) => self.select_first_entry(),
+                    None => {}
                 }
             }
             View::Tree => {
@@ -445,7 +509,7 @@ impl App {
             let mut node = tree;
             for &i in path {
                 node = &node.children[i];
-                p.push(&*node.name);
+                p.push(node.file_name());
             }
         }
         p
@@ -515,7 +579,7 @@ impl App {
             View::Tree => self
                 .selected_tree_row()
                 .filter(|r| !r.parent)
-                .map(|r| r.path.clone()),
+                .map(|_| self.tree_row_path(self.cursor)),
         }
     }
 
@@ -618,43 +682,73 @@ impl App {
             return;
         };
         let mut rows = vec![TreeRow {
-            path: vec![],
-            guides: vec![],
+            child: 0,
+            parent_row: NO_ROW,
+            depth: 0,
             is_last: true,
             parent: true,
         }];
         let mut path = Vec::new();
-        flatten(tree, &mut path, &[], true, &opts, &self.icons, &mut rows);
+        // Row of the deepest listed ancestor of `keep`; the root row (1) at least.
+        let mut best = (0usize, 1usize);
+        flatten(
+            tree,
+            &mut path,
+            NO_ROW,
+            true,
+            &opts,
+            &self.icons,
+            &mut rows,
+            keep,
+            &mut best,
+        );
         self.tree_rows = rows;
-
-        if let Some(keep) = keep {
-            let mut want = keep;
-            loop {
-                if let Some(pos) = self
-                    .tree_rows
-                    .iter()
-                    .position(|r| !r.parent && r.path == want)
-                {
-                    self.cursor = pos;
-                    break;
-                }
-                match want.split_last() {
-                    Some((_, rest)) => want = rest,
-                    None => break,
-                }
-            }
+        if keep.is_some() {
+            self.cursor = best.1;
         }
         self.clamp_cursor();
     }
 
+    /// Child indices from the root down to tree row `idx`; empty for the
+    /// root row and `..`.
+    pub fn tree_row_path(&self, idx: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut i = idx;
+        while let Some(r) = self.tree_rows.get(i)
+            && !r.parent
+            && r.depth > 0
+        {
+            out.push(r.child as usize);
+            i = r.parent_row as usize;
+        }
+        out.reverse();
+        out
+    }
+
+    /// Guide-line flags for tree row `idx`: one per ancestor between the
+    /// root and this node's parent, `true` when that ancestor was the last of
+    /// its siblings (so no line continues past it).
+    pub fn tree_guides(&self, idx: usize) -> Vec<bool> {
+        let mut out = Vec::new();
+        let mut i = self.tree_rows.get(idx).map_or(NO_ROW, |r| r.parent_row) as usize;
+        while let Some(r) = self.tree_rows.get(i)
+            && r.depth > 0
+        {
+            out.push(r.is_last);
+            i = r.parent_row as usize;
+        }
+        out.reverse();
+        out
+    }
+
     /// Select the root's child called `name` in the active view.
-    fn select_child_by_name(&mut self, name: &str) {
+    fn select_child_by_name(&mut self, name: &OsStr) {
         let Some(tree) = &self.tree else { return };
         match self.view {
             View::List => {
                 let dir = node_at(tree, &self.path);
                 if let Some(pos) = self.rows.iter().position(|r| match r {
-                    Row::Entry(i) => &*dir.children[*i].name == name,
+                    Row::Entry(i) => dir.children[*i].file_name() == name,
                     Row::Parent | Row::Group(_) => false,
                 }) {
                     self.cursor = pos;
@@ -662,7 +756,7 @@ impl App {
             }
             View::Tree => {
                 if let Some(pos) = self.tree_rows.iter().position(|r| {
-                    !r.parent && r.path.len() == 1 && &*tree.children[r.path[0]].name == name
+                    !r.parent && r.depth == 1 && tree.children[r.child as usize].file_name() == name
                 }) {
                     self.cursor = pos;
                 }
@@ -811,14 +905,10 @@ impl App {
             self.open_volumes();
             return;
         };
-        let name = self
-            .root_path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let name = self.root_path.file_name().map(OsStr::to_os_string);
         self.filter.clear();
         self.filter_editing = false;
-        self.start_scan(parent.clone(), Vec::new(), Some(parent), Some(name));
+        self.start_scan(parent.clone(), Vec::new(), Some(parent), name);
     }
 
     // ------------------------------------------------------------------
@@ -870,11 +960,11 @@ impl App {
         if self.tree_set_expanded(true) {
             return;
         }
-        let Some(path) = self.selected_path() else {
+        if self.selected_path().is_none() {
             return;
-        };
+        }
         if let Some(next) = self.tree_rows.get(self.cursor + 1)
-            && next.path.len() == path.len() + 1
+            && next.parent_row as usize == self.cursor
         {
             self.cursor += 1;
         }
@@ -889,19 +979,13 @@ impl App {
     }
 
     fn tree_parent_row(&mut self) {
-        let Some(path) = self.selected_path() else {
+        let Some(row) = self.selected_tree_row().copied() else {
             return;
         };
-        let Some((_, parent)) = path.split_last() else {
+        if row.parent || row.depth == 0 {
             return;
-        };
-        if let Some(pos) = self
-            .tree_rows
-            .iter()
-            .position(|r| !r.parent && r.path == parent)
-        {
-            self.cursor = pos;
         }
+        self.cursor = row.parent_row as usize;
     }
 
     /// Switch between list and tree view, keeping the selection.
@@ -953,6 +1037,16 @@ impl App {
         self.rebuild();
     }
 
+    /// Problems found while loading the config or theme, shown once the
+    /// initial scan is done and dismissed with any key.
+    pub fn show_startup_warnings(&mut self, warnings: &[String]) {
+        self.popup = Popup::Message {
+            title: "Configuration warnings".into(),
+            body: warnings.join("\n"),
+            danger: false,
+        };
+    }
+
     pub fn set_status(&mut self, text: String, warn: bool) {
         self.status = Some(StatusMsg {
             text,
@@ -997,6 +1091,24 @@ impl App {
             self.set_status("cannot delete the scanned root".into(), true);
             return;
         }
+        // Entries whose contents were never scanned are refused outright: a
+        // mount point would take the whole mounted volume with it, and the
+        // confirmation would have shown a size of nothing for it.
+        let refused = self.selected_node().and_then(|n| {
+            if n.has(scan::flags::OTHER_FS) {
+                Some("mount point of another volume: not deleting (scan it from the volumes screen instead)")
+            } else if n.has(scan::flags::EXCLUDED) {
+                Some("excluded from the scan, contents unknown: not deleting")
+            } else if n.is_dir() && n.has(scan::flags::ERR) {
+                Some("directory could not be read, contents unknown: not deleting")
+            } else {
+                None
+            }
+        });
+        if let Some(why) = refused {
+            self.set_status(why.into(), true);
+            return;
+        }
         if self.config.confirm_delete {
             self.popup = Popup::Confirm { mode, path };
         } else {
@@ -1015,6 +1127,13 @@ impl App {
         let name = node.name.to_string();
         let kind = node.kind;
         let target = self.fs_path(&path);
+
+        // Something may have been mounted there since the scan: a recursive
+        // delete would run straight through into that volume.
+        if kind == Kind::Dir && is_mount_point(&target) {
+            self.set_status(format!("{name} is a mount point now: not deleting"), true);
+            return;
+        }
 
         let result: io::Result<()> = match mode {
             DeleteMode::Permanent => {
@@ -1121,6 +1240,7 @@ impl App {
             self.status = None;
         }
         self.poll_scan();
+        self.poll_volumes();
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
@@ -1351,7 +1471,7 @@ impl App {
                     }
                     KeyCode::Char('S') => {
                         let id = self.theme.id.clone();
-                        match crate::config::set_default_theme(&id) {
+                        match crate::config::set_default_theme(&self.theme.spec) {
                             Ok(path) => self.set_status(
                                 format!("default theme {id} saved to {}", path.display()),
                                 false,
@@ -1436,15 +1556,58 @@ impl App {
     // Volumes screen
 
     /// Show every mounted and unmounted volume. Reached from `..` at the
-    /// filesystem root, with `V`, or `--volumes`.
+    /// filesystem root, with `V`, or `--volumes`. The last known list is
+    /// shown at once while a fresh one loads in the background.
     pub fn open_volumes(&mut self) {
-        let view = VolumesView::load();
-        self.mounts = view.list.iter().filter(|v| v.mounted()).cloned().collect();
         if !volumes::supported() {
             self.set_status("volume listing is only available on Linux".into(), true);
         }
-        self.volumes = Some(view);
+        let loading = self.load_volumes(None, false);
+        self.volumes = Some(VolumesView::new(self.all_volumes.clone(), loading));
         self.filter_editing = false;
+    }
+
+    /// Start volume discovery on a background thread unless one is already
+    /// running. Returns whether a load is in progress.
+    fn load_volumes(&mut self, keep: Option<String>, announce: bool) -> bool {
+        if !volumes::supported() {
+            return false;
+        }
+        if self.volumes_job.is_some() {
+            return true;
+        }
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(volumes::list());
+        });
+        self.volumes_job = Some(VolumesJob { rx, keep, announce });
+        true
+    }
+
+    fn poll_volumes(&mut self) {
+        let Some(job) = &self.volumes_job else { return };
+        let list = match job.rx.try_recv() {
+            Ok(list) => list,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => Vec::new(),
+        };
+        let job = self.volumes_job.take().expect("volumes job present");
+        self.mounts = list.iter().filter(|v| v.mounted()).cloned().collect();
+        self.all_volumes = list.clone();
+        if let Some(view) = self.volumes.as_mut() {
+            let keep = job
+                .keep
+                .or_else(|| view.selected().map(|v| v.device.clone()));
+            view.list = list;
+            view.loading = false;
+            view.cursor = keep
+                .and_then(|d| view.list.iter().position(|v| v.device == d))
+                .or_else(|| view.list.iter().position(|v| v.mounted()))
+                .unwrap_or(0);
+        }
+        if job.announce {
+            self.set_status("volumes refreshed".into(), false);
+        }
     }
 
     /// The mounted volume at exactly `path`, if any.
@@ -1493,15 +1656,11 @@ impl App {
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => self.scan_selected_volume(),
             KeyCode::Char('r') => {
                 let keep = view.selected().map(|v| v.device.clone());
-                let mut fresh = VolumesView::load();
-                if let Some(d) = keep
-                    && let Some(pos) = fresh.list.iter().position(|v| v.device == d)
+                if self.load_volumes(keep, true)
+                    && let Some(view) = self.volumes.as_mut()
                 {
-                    fresh.cursor = pos;
+                    view.loading = true;
                 }
-                self.mounts = fresh.list.iter().filter(|v| v.mounted()).cloned().collect();
-                self.volumes = Some(fresh);
-                self.set_status("volumes refreshed".into(), false);
             }
             KeyCode::Char('?') | KeyCode::F(1) => self.popup = Popup::Help { scroll: 0 },
             KeyCode::Char('T') => {
@@ -1554,7 +1713,7 @@ impl App {
             }
         };
         doc.name = Some(name.to_string());
-        let id = theme::slugify(name);
+        let id = theme::unique_user_theme_id(&theme::slugify(name));
         match theme::save_user_theme(&id, &doc) {
             Ok(path) => {
                 self.themes = theme::available_themes();
@@ -1786,6 +1945,47 @@ pub fn node_at_mut<'a>(root: &'a mut Node, path: &[usize]) -> &'a mut Node {
     path.iter().fold(root, |n, &i| &mut n.children[i])
 }
 
+/// Follow `names` down from `from`, stopping at the first directory that is
+/// no longer there. Keeps the list view's location across a rescan.
+fn resolve_by_names(root: &Node, from: &[usize], names: &[OsString]) -> Vec<usize> {
+    let mut path = from.to_vec();
+    let mut node = node_at(root, from);
+    for name in names {
+        let Some(i) = node
+            .children
+            .iter()
+            .position(|c| c.is_dir() && c.file_name() == name.as_os_str())
+        else {
+            break;
+        };
+        path.push(i);
+        node = &node.children[i];
+    }
+    path
+}
+
+/// Whether `path` is a directory on a different filesystem from its parent.
+#[cfg(unix)]
+fn is_mount_point(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(md) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !md.is_dir() {
+        return false;
+    }
+    match path.parent().map(std::fs::metadata) {
+        Some(Ok(parent)) => parent.dev() != md.dev(),
+        Some(Err(_)) => false,
+        None => true,
+    }
+}
+
+#[cfg(not(unix))]
+fn is_mount_point(_path: &Path) -> bool {
+    false
+}
+
 /// Sorted, filtered child indices of `dir`.
 fn sorted_children(dir: &Node, o: &ListOpts) -> Vec<usize> {
     let mut idx: Vec<usize> = (0..dir.children.len())
@@ -1794,7 +1994,7 @@ fn sorted_children(dir: &Node, o: &ListOpts) -> Vec<usize> {
             (o.show_hidden || !c.name.starts_with('.'))
                 && (o.needle.is_empty()
                     || (o.dirs_always && c.is_dir())
-                    || c.name.to_lowercase().contains(&o.needle))
+                    || contains_ci(&c.name, &o.needle))
         })
         .collect();
     idx.sort_by(|&a, &b| {
@@ -1804,14 +2004,43 @@ fn sorted_children(dir: &Node, o: &ListOpts) -> Vec<usize> {
         }
         let ord = match o.sort {
             SortKey::Size => nb.size_of(o.apparent).cmp(&na.size_of(o.apparent)),
-            SortKey::Name => na.name.to_lowercase().cmp(&nb.name.to_lowercase()),
+            SortKey::Name => cmp_ci(&na.name, &nb.name),
             SortKey::Count => nb.items.cmp(&na.items),
             SortKey::Mtime => nb.mtime.cmp(&na.mtime),
         };
         let ord = if o.reverse { ord.reverse() } else { ord };
-        ord.then_with(|| na.name.to_lowercase().cmp(&nb.name.to_lowercase()))
+        ord.then_with(|| cmp_ci(&na.name, &nb.name))
     });
     idx
+}
+
+/// Case-insensitive ordering without allocating: a byte walk for ASCII
+/// names, Unicode lowercasing otherwise. Sorting a large directory used to
+/// build two lowercase strings per comparison.
+fn cmp_ci(a: &str, b: &str) -> Ordering {
+    if a.is_ascii() && b.is_ascii() {
+        a.bytes()
+            .map(|c| c.to_ascii_lowercase())
+            .cmp(b.bytes().map(|c| c.to_ascii_lowercase()))
+    } else {
+        a.chars()
+            .flat_map(char::to_lowercase)
+            .cmp(b.chars().flat_map(char::to_lowercase))
+    }
+}
+
+/// Case-insensitive substring test; `needle` is already lowercase.
+fn contains_ci(hay: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if hay.is_ascii() && needle.is_ascii() {
+        hay.as_bytes()
+            .windows(needle.len())
+            .any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+    } else {
+        hay.to_lowercase().contains(needle)
+    }
 }
 
 /// Children of `dir` in display order, optionally bucketed by type.
@@ -1868,22 +2097,35 @@ fn arrange(dir: &Node, o: &ListOpts, icons: &IconSet) -> Vec<(Option<GroupInfo>,
     groups.into_iter().map(|(g, m)| (Some(g), m)).collect()
 }
 
-/// Depth-first flattening of the expanded tree into rows.
+/// Depth-first flattening of the expanded tree into rows. `keep` is the path
+/// the cursor should land on; `best` receives `(depth, row)` of the deepest
+/// row that lies on it, so the caller does not have to search the rows.
+#[allow(clippy::too_many_arguments)]
 fn flatten(
     node: &Node,
     path: &mut Vec<usize>,
-    guides: &[bool],
+    parent_row: u32,
     is_last: bool,
     o: &ListOpts,
     icons: &IconSet,
     out: &mut Vec<TreeRow>,
+    keep: Option<&[usize]>,
+    best: &mut (usize, usize),
 ) {
+    let me = out.len();
     out.push(TreeRow {
-        path: path.clone(),
-        guides: guides.to_vec(),
+        child: path.last().copied().unwrap_or(0) as u32,
+        parent_row,
+        depth: path.len() as u16,
         is_last,
         parent: false,
     });
+    if let Some(k) = keep
+        && k.starts_with(path)
+        && path.len() >= best.0
+    {
+        *best = (path.len(), me);
+    }
     if !(node.is_dir() && node.expanded) {
         return;
     }
@@ -1892,23 +2134,18 @@ fn flatten(
         .flat_map(|(_, m)| m)
         .collect();
     let n = kids.len();
-    let child_guides: Vec<bool> = if path.is_empty() {
-        Vec::new()
-    } else {
-        let mut g = guides.to_vec();
-        g.push(is_last);
-        g
-    };
     for (k, &i) in kids.iter().enumerate() {
         path.push(i);
         flatten(
             &node.children[i],
             path,
-            &child_guides,
+            me as u32,
             k + 1 == n,
             o,
             icons,
             out,
+            keep,
+            best,
         );
         path.pop();
     }
@@ -1958,6 +2195,7 @@ mod tests {
     fn leaf(name: &str, size: u64) -> Node {
         Node {
             name: name.into(),
+            raw: None,
             kind: Kind::File,
             size,
             apparent: size,
@@ -1974,6 +2212,7 @@ mod tests {
         let items = children.iter().map(|c| 1 + c.items).sum();
         Node {
             name: name.into(),
+            raw: None,
             kind: Kind::Dir,
             size,
             apparent: size,
@@ -2011,6 +2250,8 @@ mod tests {
             tree: Some(tree),
             volumes: None,
             mounts: vec![],
+            all_volumes: vec![],
+            volumes_job: None,
             path: vec![],
             rows: vec![],
             tree_rows: vec![],
@@ -2069,14 +2310,22 @@ mod tests {
         let t = app.tree.as_ref().unwrap();
         app.tree_rows
             .iter()
-            .map(|r| {
+            .enumerate()
+            .map(|(i, r)| {
                 if r.parent {
                     "..".to_string()
                 } else {
-                    format!("{}{}", " ".repeat(r.depth()), node_at(t, &r.path).name)
+                    let node = node_at(t, &app.tree_row_path(i));
+                    format!("{}{}", " ".repeat(r.depth()), node.name)
                 }
             })
             .collect()
+    }
+
+    fn tree_row_at(app: &App, path: &[usize]) -> usize {
+        (0..app.tree_rows.len())
+            .find(|&i| !app.tree_rows[i].parent && app.tree_row_path(i) == path)
+            .unwrap()
     }
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -2354,7 +2603,7 @@ mod tests {
         assert_eq!(tree_names(&app)[app.cursor], " big");
         let row = app.selected_tree_row().unwrap();
         assert!(!row.is_last);
-        assert!(row.guides.is_empty());
+        assert!(app.tree_guides(app.cursor).is_empty());
 
         app.on_key(key(KeyCode::Char('+')));
         assert_eq!(
@@ -2363,9 +2612,9 @@ mod tests {
                 "..", "/root", " big", "  x", "  y", " .hidden", " medium", " small"
             ]
         );
-        let y = &app.tree_rows[4];
-        assert_eq!(y.guides, vec![false]); // "big" is not last, so a guide line is drawn
-        assert!(y.is_last);
+        assert_eq!(app.tree_guides(4), vec![false]); // "big" is not last, so a guide line is drawn
+        assert!(app.tree_rows[4].is_last);
+        assert_eq!(app.tree_row_path(4), vec![1, 1]);
 
         app.on_key(key(KeyCode::Char('-')));
         assert_eq!(tree_names(&app).len(), 6);
@@ -2399,11 +2648,7 @@ mod tests {
         app.on_key(key(KeyCode::Char('*')));
         assert_eq!(app.tree_rows.len(), 8);
         // Select "y" inside big, switch back: list shows big's listing with y selected.
-        app.cursor = app
-            .tree_rows
-            .iter()
-            .position(|r| r.path == vec![1, 1])
-            .unwrap();
+        app.cursor = tree_row_at(&app, &[1, 1]);
         app.switch_view();
         assert_eq!(app.view, View::List);
         assert_eq!(app.path, vec![1]);
@@ -2415,11 +2660,7 @@ mod tests {
         let mut app = app_with(sample());
         app.switch_view();
         app.on_key(key(KeyCode::Char('+')));
-        app.cursor = app
-            .tree_rows
-            .iter()
-            .position(|r| r.path == vec![1, 0])
-            .unwrap();
+        app.cursor = tree_row_at(&app, &[1, 0]);
         assert_eq!(app.selected_share_base(), 1000);
         app.cursor = 1;
         assert_eq!(app.selected_share_base(), 1410);
@@ -2434,5 +2675,138 @@ mod tests {
         app.cursor = 2;
         app.on_key(key(KeyCode::Char('*')));
         assert_eq!(tree_names(&app), ["..", "/root", " big", "  x"]);
+    }
+
+    #[test]
+    fn root_rescan_keeps_the_list_location_by_name() {
+        let mut app = app_with(sample());
+        app.enter(); // into big, child index 1
+        assert_eq!(app.path, vec![1]);
+        // The rescanned root lists big at a different index.
+        let fresh = dir(
+            "/root",
+            vec![
+                dir("big", vec![leaf("x", 500), leaf("y", 500)]),
+                leaf("small", 10),
+            ],
+        );
+        app.splice(vec![], fresh);
+        assert_eq!(app.path, vec![0]);
+        assert_eq!(names(&app), ["..", "x", "y"]);
+        // When big is gone, fall back to the nearest surviving ancestor.
+        app.splice(vec![], dir("/root", vec![leaf("small", 10)]));
+        assert!(app.path.is_empty());
+        assert_eq!(names(&app), ["..", "small"]);
+        assert_eq!(names(&app)[app.cursor], "small");
+    }
+
+    #[test]
+    fn delete_is_refused_for_unscanned_directories() {
+        for (flag, word) in [
+            (scan::flags::OTHER_FS, "mount point"),
+            (scan::flags::EXCLUDED, "excluded"),
+            (scan::flags::ERR, "could not be read"),
+        ] {
+            let mut tree = sample();
+            tree.children[1].flags |= flag;
+            let mut app = app_with(tree);
+            assert_eq!(names(&app)[app.cursor], "big");
+            app.request_delete(DeleteMode::Permanent);
+            assert!(
+                matches!(app.popup, Popup::None),
+                "no confirmation for {word}"
+            );
+            let status = app.status.as_ref().unwrap();
+            assert!(status.warn && status.text.contains(word), "{}", status.text);
+            assert_eq!(app.tree.as_ref().unwrap().children.len(), 4);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_uses_the_raw_file_name() {
+        use std::os::unix::ffi::OsStrExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let raw = tmp.path().join(OsStr::from_bytes(b"bad\xffname"));
+        let lossy = tmp.path().join("bad\u{FFFD}name");
+        std::fs::write(&raw, "raw").unwrap();
+        std::fs::write(&lossy, "lossy").unwrap();
+        let tree = scan::scan(tmp.path(), &ScanOptions::default(), &Progress::default()).unwrap();
+        let mut app = app_with(tree);
+        app.root_path = tmp.path().to_path_buf();
+        let i = app
+            .current()
+            .unwrap()
+            .children
+            .iter()
+            .position(|c| c.file_name().as_bytes() == b"bad\xffname")
+            .unwrap();
+        app.perform_delete(DeleteMode::Permanent, vec![i]);
+        assert!(matches!(app.popup, Popup::None), "delete succeeded");
+        assert!(!raw.exists(), "the raw-named file was deleted");
+        assert!(lossy.exists(), "the look-alike was left alone");
+        app.perform_delete(DeleteMode::Permanent, vec![0]);
+        assert!(!lossy.exists());
+    }
+
+    #[test]
+    fn mount_point_detection() {
+        assert!(is_mount_point(Path::new("/")));
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!is_mount_point(tmp.path()));
+        assert!(!is_mount_point(&tmp.path().join("missing")));
+    }
+
+    #[test]
+    fn volumes_load_in_the_background() {
+        let mut app = app_with(sample());
+        app.open_volumes();
+        let view = app.volumes.as_ref().unwrap();
+        assert_eq!(view.loading, volumes::supported());
+        assert!(view.list.is_empty());
+        // Stand in for the discovery thread.
+        let (tx, rx) = mpsc::channel();
+        app.volumes_job = Some(VolumesJob {
+            rx,
+            keep: Some("/dev/sdb1".into()),
+            announce: true,
+        });
+        let vol = |dev: &str, mp: Option<&str>| Volume {
+            device: dev.into(),
+            mount_point: mp.map(PathBuf::from),
+            fs_type: "ext4".into(),
+            label: None,
+            model: None,
+            total: 10,
+            used: 5,
+            kind: volumes::VolumeKind::Disk,
+            read_only: false,
+        };
+        app.poll_volumes();
+        assert!(app.volumes_loading(), "nothing landed yet");
+        tx.send(vec![
+            vol("/dev/sda1", Some("/")),
+            vol("/dev/sdb1", Some("/data")),
+            vol("/dev/sdc1", None),
+        ])
+        .unwrap();
+        app.poll_volumes();
+        assert!(!app.volumes_loading());
+        let view = app.volumes.as_ref().unwrap();
+        assert!(!view.loading);
+        assert_eq!(view.cursor, 1, "the kept device stays selected");
+        assert_eq!(app.mounts.len(), 2);
+        assert_eq!(app.all_volumes.len(), 3);
+        assert_eq!(app.status.as_ref().unwrap().text, "volumes refreshed");
+    }
+
+    #[test]
+    fn case_insensitive_helpers() {
+        assert_eq!(cmp_ci("abc", "ABD"), Ordering::Less);
+        assert_eq!(cmp_ci("Straße", "strasse"), "straße".cmp("strasse"));
+        assert!(contains_ci("Hello World", "o w"));
+        assert!(!contains_ci("Hello", "hello!"));
+        assert!(contains_ci("ÄRGER", "ärg"));
+        assert!(contains_ci("x", ""));
     }
 }

@@ -86,11 +86,6 @@ pub fn list() -> Vec<Volume> {
     }
 }
 
-/// Only the mounted volumes, for looking up mount points inside a scan.
-pub fn mounted() -> Vec<Volume> {
-    list().into_iter().filter(Volume::mounted).collect()
-}
-
 /// Whether volume listing is implemented for this platform.
 pub fn supported() -> bool {
     cfg!(target_os = "linux")

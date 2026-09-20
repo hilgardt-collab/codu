@@ -226,21 +226,76 @@ pub fn toml_string(s: &str) -> String {
     out
 }
 
+/// Every top-level key `config.toml` understands, so that a misspelt key can
+/// be reported instead of silently ignored: a `readonly = true` that did
+/// nothing would be a nasty surprise.
+pub const KNOWN_KEYS: &[&str] = &[
+    "theme",
+    "icons",
+    "view",
+    "mouse",
+    "borders",
+    "key-guide",
+    "si",
+    "apparent-size",
+    "dirs-first",
+    "group-by-type",
+    "show-hidden",
+    "show-count",
+    "show-mtime",
+    "bar-mode",
+    "bar-width",
+    "sort",
+    "sort-reverse",
+    "exclude",
+    "one-file-system",
+    "threads",
+    "confirm-delete",
+    "read-only",
+    "cd-on-exit",
+    "date-format",
+];
+
 impl Config {
     /// Load from an explicit path, or from the default location if it exists.
-    /// A missing default file yields the built-in defaults.
-    pub fn load(explicit: Option<&Path>) -> Result<Config> {
+    /// A missing default file yields the built-in defaults. Unknown keys are
+    /// returned as warnings rather than treated as errors.
+    pub fn load(explicit: Option<&Path>) -> Result<(Config, Vec<String>)> {
         let path = match explicit {
             Some(p) => p.to_path_buf(),
             None => match default_config_path() {
                 Some(p) if p.is_file() => p,
-                _ => return Ok(Config::default()),
+                _ => return Ok((Config::default(), Vec::new())),
             },
         };
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("reading config {}", path.display()))?;
-        toml::from_str(&text).with_context(|| format!("parsing config {}", path.display()))
+        Config::parse(&text).with_context(|| format!("parsing config {}", path.display()))
     }
+
+    /// Parse config text, reporting unknown top-level keys as warnings.
+    pub fn parse(text: &str) -> Result<(Config, Vec<String>)> {
+        let table: toml::Table = toml::from_str(text)?;
+        let warnings = table
+            .keys()
+            .filter(|k| !KNOWN_KEYS.contains(&k.as_str()))
+            .map(|k| match nearest_key(k) {
+                Some(known) => {
+                    format!("config: unknown key `{k}` ignored (did you mean `{known}`?)")
+                }
+                None => format!("config: unknown key `{k}` ignored"),
+            })
+            .collect();
+        let config: Config = toml::from_str(text)?;
+        Ok((config, warnings))
+    }
+}
+
+/// A known key that differs from `key` only in case or in `-`/`_` separators.
+fn nearest_key(key: &str) -> Option<&'static str> {
+    let fold = |s: &str| s.to_ascii_lowercase().replace(['-', '_'], "");
+    let want = fold(key);
+    KNOWN_KEYS.iter().copied().find(|k| fold(k) == want)
 }
 
 #[cfg(test)]
@@ -260,6 +315,36 @@ mod tests {
         assert_eq!(parsed.sort, def.sort);
         assert_eq!(parsed.date_format, def.date_format);
         assert_eq!(parsed.show_hidden, def.show_hidden);
+    }
+
+    #[test]
+    fn known_keys_match_the_default_config_file() {
+        let table: toml::Table = toml::from_str(DEFAULT_CONFIG_TOML).unwrap();
+        let mut in_file: Vec<&str> = table.keys().map(String::as_str).collect();
+        in_file.sort_unstable();
+        let mut known = KNOWN_KEYS.to_vec();
+        known.sort_unstable();
+        assert_eq!(in_file, known);
+    }
+
+    #[test]
+    fn unknown_keys_warn_and_never_apply() {
+        let (c, w) = Config::parse("readonly = true\nbogus = 1\ntheme = \"nord\"\n").unwrap();
+        assert!(!c.read_only, "the typo must not silently take effect");
+        assert_eq!(c.theme, "nord");
+        assert_eq!(w.len(), 2);
+        assert!(
+            w.iter()
+                .any(|m| m.contains("`readonly`") && m.contains("did you mean `read-only`")),
+            "{w:?}"
+        );
+        assert!(
+            w.iter()
+                .any(|m| m.contains("`bogus`") && !m.contains("did you mean")),
+            "{w:?}"
+        );
+        let (_, w) = Config::parse("theme = \"nord\"\n").unwrap();
+        assert!(w.is_empty());
     }
 
     #[test]

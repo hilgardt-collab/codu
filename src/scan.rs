@@ -6,6 +6,7 @@
 //! scan runs, and the scan can be cancelled cooperatively.
 
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::fs::{self, Metadata};
 use std::io;
 use std::path::Path;
@@ -43,8 +44,14 @@ pub mod flags {
 
 #[derive(Debug)]
 pub struct Node {
-    /// File name (the root node holds the full path instead).
+    /// Display name: the file name with invalid UTF-8 and control characters
+    /// replaced (the root node holds the full path instead).
     pub name: Box<str>,
+    /// The exact on-disk name when it differs from `name`. Paths for
+    /// deleting, trashing or rescanning are built from this, never from the
+    /// display form, so a name that is not valid UTF-8 can never be confused
+    /// with another entry that merely looks the same.
+    pub raw: Option<Box<OsStr>>,
     pub kind: Kind,
     /// Disk usage in bytes (allocated blocks × 512 on Unix).
     pub size: u64,
@@ -62,13 +69,16 @@ pub struct Node {
 }
 
 impl Node {
-    fn new(name: String, kind: Kind, md: Option<&Metadata>) -> Self {
+    fn new(raw_name: &OsStr, kind: Kind, md: Option<&Metadata>) -> Self {
         let (size, apparent, mtime) = match md {
             Some(md) => (disk_size(md), md.len(), mtime_of(md)),
             None => (0, 0, 0),
         };
+        let name = sanitize(&raw_name.to_string_lossy());
+        let raw = (raw_name.as_encoded_bytes() != name.as_bytes()).then(|| Box::from(raw_name));
         Node {
             name: name.into_boxed_str(),
+            raw,
             kind,
             size,
             apparent,
@@ -92,6 +102,15 @@ impl Node {
 
     pub fn is_dir(&self) -> bool {
         self.kind == Kind::Dir
+    }
+
+    /// The name to use on the filesystem: the raw bytes when they could not
+    /// be shown as-is, otherwise the display name.
+    pub fn file_name(&self) -> &OsStr {
+        match &self.raw {
+            Some(raw) => raw,
+            None => OsStr::new(&*self.name),
+        }
     }
 
     pub fn has(&self, flag: u8) -> bool {
@@ -234,15 +253,13 @@ pub fn scan(root: &Path, opts: &ScanOptions, progress: &Progress) -> io::Result<
     };
     let mut node = scan_dir(root, &md, &ctx);
     node.name = sanitize(&root.display().to_string()).into_boxed_str();
+    node.raw = None;
     Ok(node)
 }
 
 fn scan_dir(path: &Path, md: &Metadata, ctx: &Ctx) -> Node {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string());
-    let mut node = Node::new(sanitize(&name), Kind::Dir, Some(md));
+    let name = path.file_name().unwrap_or(path.as_os_str());
+    let mut node = Node::new(name, Kind::Dir, Some(md));
     let (own_size, own_apparent, own_mtime) = (node.size, node.apparent, node.mtime);
 
     if ctx.progress.cancelled() {
@@ -262,6 +279,9 @@ fn scan_dir(path: &Path, md: &Metadata, ctx: &Ctx) -> Node {
     };
 
     let mut dirs = Vec::new();
+    // Progress counters are published once per directory rather than once
+    // per entry, so worker threads do not all contend on the same counters.
+    let (mut seen, mut bytes) = (0u64, 0u64);
     for entry in rd {
         let entry = match entry {
             Ok(e) => e,
@@ -270,27 +290,27 @@ fn scan_dir(path: &Path, md: &Metadata, ctx: &Ctx) -> Node {
                 continue;
             }
         };
-        ctx.progress.items.fetch_add(1, Ordering::Relaxed);
+        seen += 1;
         let raw_name = entry.file_name();
-        let name = sanitize(&raw_name.to_string_lossy());
-        let child_path = entry.path();
 
         // `DirEntry::metadata` does not follow symlinks, which is what we want.
         let md = match entry.metadata() {
             Ok(md) => md,
             Err(_) => {
-                let mut n = Node::new(name, Kind::Other, None);
+                let mut n = Node::new(&raw_name, Kind::Other, None);
                 n.flags |= flags::ERR;
                 node.children.push(n);
                 continue;
             }
         };
 
+        // The full path is only built when something needs it: an exclude
+        // pattern, or descending into a subdirectory.
         if let Some(set) = &ctx.opts.excludes
-            && (set.is_match(&raw_name) || set.is_match(&child_path))
+            && (set.is_match(&raw_name) || set.is_match(entry.path()))
         {
             let kind = if md.is_dir() { Kind::Dir } else { Kind::File };
-            let mut n = Node::new(name, kind, None);
+            let mut n = Node::new(&raw_name, kind, None);
             n.flags |= flags::EXCLUDED;
             node.children.push(n);
             continue;
@@ -299,29 +319,32 @@ fn scan_dir(path: &Path, md: &Metadata, ctx: &Ctx) -> Node {
         let ft = md.file_type();
         if ft.is_dir() {
             if ctx.opts.one_file_system && dev_of(&md) != ctx.root_dev {
-                let mut n = Node::new(name, Kind::Dir, Some(&md));
+                let mut n = Node::new(&raw_name, Kind::Dir, Some(&md));
                 n.flags |= flags::OTHER_FS;
                 node.children.push(n);
                 continue;
             }
-            dirs.push((child_path, md));
+            dirs.push((entry.path(), md));
         } else if ft.is_symlink() {
             node.children
-                .push(Node::new(name, Kind::Symlink, Some(&md)));
+                .push(Node::new(&raw_name, Kind::Symlink, Some(&md)));
         } else if ft.is_file() {
-            let mut n = Node::new(name, Kind::File, Some(&md));
+            let mut n = Node::new(&raw_name, Kind::File, Some(&md));
             if is_shared_hardlink(&md, ctx) {
                 n.flags |= flags::HARDLINK;
                 n.size = 0;
                 n.apparent = 0;
             } else {
-                ctx.progress.bytes.fetch_add(n.size, Ordering::Relaxed);
+                bytes += n.size;
             }
             node.children.push(n);
         } else {
-            node.children.push(Node::new(name, Kind::Other, Some(&md)));
+            node.children
+                .push(Node::new(&raw_name, Kind::Other, Some(&md)));
         }
     }
+    ctx.progress.items.fetch_add(seen, Ordering::Relaxed);
+    ctx.progress.bytes.fetch_add(bytes, Ordering::Relaxed);
 
     if !dirs.is_empty() {
         let scanned: Vec<Node> = dirs
@@ -336,7 +359,7 @@ fn scan_dir(path: &Path, md: &Metadata, ctx: &Ctx) -> Node {
 }
 
 /// Replace control characters so file names can never corrupt the display.
-fn sanitize(name: &str) -> String {
+pub fn sanitize(name: &str) -> String {
     if name.chars().any(char::is_control) {
         name.chars()
             .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
@@ -511,5 +534,27 @@ mod tests {
     fn sanitizes_control_chars() {
         assert_eq!(sanitize("a\nb"), "a\u{FFFD}b");
         assert_eq!(sanitize("plain"), "plain");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn odd_names_display_safely_but_keep_their_raw_bytes() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write(&root.join(OsStr::from_bytes(b"bad\xffname")), 1);
+        write(&root.join("ctl\nname"), 1);
+        write(&root.join("plain"), 1);
+        let node = scan(root, &ScanOptions::default(), &Progress::default()).unwrap();
+        let by_display = |n: &str| node.children.iter().find(|c| &*c.name == n).unwrap();
+        let bad = by_display("bad\u{FFFD}name");
+        assert_eq!(bad.file_name().as_bytes(), b"bad\xffname");
+        let ctl = by_display("ctl\u{FFFD}name");
+        assert_eq!(ctl.file_name().as_bytes(), b"ctl\nname");
+        let plain = by_display("plain");
+        assert!(plain.raw.is_none(), "ordinary names are stored once");
+        assert_eq!(plain.file_name(), OsStr::new("plain"));
+        assert!(node.raw.is_none(), "the root keeps its path elsewhere");
     }
 }

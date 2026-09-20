@@ -326,6 +326,9 @@ impl Default for BarTheme {
 #[derive(Clone, Debug)]
 pub struct Theme {
     pub id: String,
+    /// What `config.toml` needs to get this theme back: the id for built-in
+    /// and user themes, the absolute path for one loaded from a file.
+    pub spec: String,
     pub name: String,
     pub dark: Option<bool>,
     pub styles: Styles,
@@ -394,6 +397,7 @@ impl Theme {
 
         Theme {
             id: id.to_string(),
+            spec: id.to_string(),
             name: file.name.clone().unwrap_or_else(|| id.to_string()),
             dark: file.dark.or(base.and_then(|b| b.dark)),
             styles,
@@ -454,7 +458,12 @@ impl Theme {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| name.to_string());
-            return Theme::parse(&id, &text, Some(&base));
+            let mut theme = Theme::parse(&id, &text, Some(&base))?;
+            theme.spec = std::path::absolute(as_path)
+                .unwrap_or_else(|_| as_path.to_path_buf())
+                .display()
+                .to_string();
+            return Ok(theme);
         }
         if let Some(dir) = crate::config::themes_dir() {
             let candidate = dir.join(format!("{name}.toml"));
@@ -550,6 +559,26 @@ pub fn save_user_theme(id: &str, doc: &ThemeDoc) -> Result<PathBuf> {
     let text = format!("# codu theme (edited in codu)\n{}", doc.to_toml());
     std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
     Ok(path)
+}
+
+/// `base`, or `base-2`, `base-3`, … when a user theme with that id already
+/// exists, so creating a copy never overwrites another theme.
+pub fn unique_user_theme_id(base: &str) -> String {
+    match crate::config::themes_dir() {
+        Some(dir) => unique_id_in(&dir, base),
+        None => base.to_string(),
+    }
+}
+
+fn unique_id_in(dir: &Path, base: &str) -> String {
+    let taken = |id: &str| dir.join(format!("{id}.toml")).exists();
+    if !taken(base) {
+        return base.to_string();
+    }
+    (2..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|id| !taken(id))
+        .unwrap_or_else(|| base.to_string())
 }
 
 /// Turn a display name into a file-safe theme id.
@@ -837,6 +866,28 @@ mod tests {
         assert_eq!(slugify("My Theme!"), "my-theme");
         assert_eq!(slugify("  Nord (light) "), "nord-light");
         assert_eq!(slugify("???"), "custom");
+    }
+
+    #[test]
+    fn copies_never_overwrite_an_existing_theme() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(unique_id_in(tmp.path(), "mine"), "mine");
+        std::fs::write(tmp.path().join("mine.toml"), "").unwrap();
+        std::fs::write(tmp.path().join("mine-2.toml"), "").unwrap();
+        assert_eq!(unique_id_in(tmp.path(), "mine"), "mine-3");
+    }
+
+    #[test]
+    fn theme_spec_round_trips_through_config() {
+        assert_eq!(Theme::load("nord").unwrap().spec, "nord");
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("custom.toml");
+        std::fs::write(&file, "name = \"Custom\"\n").unwrap();
+        let t = Theme::load(&file.display().to_string()).unwrap();
+        assert_eq!(t.id, "custom");
+        assert_eq!(t.name, "Custom");
+        assert_eq!(t.spec, file.display().to_string());
+        assert_eq!(Theme::load(&t.spec).unwrap().name, "Custom");
     }
 
     #[test]

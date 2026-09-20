@@ -24,7 +24,8 @@ Takeaways:
 * Show progress while scanning; big trees take seconds to minutes.
 * Nobody in this space does real theming. gdu themes two elements. A full
   theme file (every UI element + icon set + bar gradient) is the differentiator.
-* Deleting is expected but must be guarded (confirmation, `--read-only`, and a
+* Deleting is expected but must be guarded (confirmation, `--read-only`, a
+  refusal for anything whose contents were never scanned, and a
   safer "move to trash" alternative).
 
 ### ratatui 0.30
@@ -178,7 +179,10 @@ walk up the filesystem without restarting. The scan is cancellable with
 * A mount point inside the scan is a directory node with the `OTHER_FS`
   flag and zero size; the row renders that volume's own `statvfs` usage in
   the `mount` style with a `volume <dev>` label where the bar would be, so
-  it is visibly not part of the scan's arithmetic.
+  it is visibly not part of the scan's arithmetic. Delete and trash refuse
+  `OTHER_FS`, `EXCLUDED` and unreadable directories (`std::fs::remove_dir_all`
+  would happily run through a mount), and re-check `st_dev` against the
+  parent right before deleting in case something was mounted since the scan.
 * The volumes screen is a separate top-level state (`App::volumes`), shown
   instead of the browser. Entering a mounted volume starts a scan with it
   as the new root; the screen closes when the scan lands. Esc returns to
@@ -190,6 +194,10 @@ walk up the filesystem without restarting. The scan is cancellable with
   `/run/udev/data/b<maj>:<min>` (world-readable, no root needed) and size
   from sysfs; removable/optical from sysfs; usage via `libc::statvfs`.
   RAID and LVM members are skipped (their assembled devices are listed).
+  Discovery always runs on a background thread (`App::volumes_job`):
+  `statvfs` on a hung NFS/CIFS/FUSE mount blocks for as long as the kernel
+  waits, and that must never stall startup or the UI. The volumes screen
+  shows the last known list with a "refreshing" note meanwhile.
 
 ### Change directory on exit
 
@@ -217,6 +225,10 @@ different directory than they started in without the wrapper installed.
 * The tree is the same data as the list; `expanded` is a per-node flag.
   Rows are flattened depth-first from the root on every structural change
   (expand, collapse, sort, filter, delete, rescan), not on cursor movement.
+  A `TreeRow` is 12 bytes of links (child index, parent row, depth, last
+  flag) rather than a copy of its index path: `App::tree_row_path` and
+  `tree_guides` walk `parent_row` on demand, so "expand all" on a
+  million-entry tree costs about 10 MiB instead of 100.
 * Guide lines (`│ ├─ └─`) are drawn per ancestor level; on very deep paths
   the guides compress to `…<depth>` so the name column stays readable.
 * Directories show `+`/`-`, files a blank toggle. Expanded directories use
